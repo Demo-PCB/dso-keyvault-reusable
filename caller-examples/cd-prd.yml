@@ -1,5 +1,5 @@
 # =====================================================
-# Caller Workflow: CD PRD - Azure App Configuration
+# Caller Workflow: CD PRD - Azure KeyVault
 # =====================================================
 # Deploys configuration to the PRD (Production) environment.
 # Requires manual approval before deployment.
@@ -12,7 +12,7 @@
 # - GitHub environment 'prd' with protection rules configured
 # =====================================================
 
-name: CD - App Configuration (PRD)
+name: CD - KeyVault (PRD)
 
 on:
   workflow_dispatch:

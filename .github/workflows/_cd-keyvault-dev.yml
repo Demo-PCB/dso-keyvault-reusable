@@ -1,14 +1,14 @@
 # =====================================================
-# CD Reusable Workflow - Azure App Configuration (DEV)
+# CD Reusable Workflow - Azure KeyVault (DEV)
 # =====================================================
-# This workflow deploys App Configuration changes to the DEV environment.
+# This workflow deploys KeyVault changes to the DEV environment.
 #
 # Workflow stages:
 # 1. prepare - Load configs, validate inputs
 # 2. download-artifact - Retrieve artifact from Artifactory
 # 3. azure-login - Authenticate using OIDC federated token
 # 4. dry-run - Preview changes using AZ CLI (non-destructive)
-# 5. deploy - Import configuration to Azure App Configuration
+# 5. deploy - Import configuration to Azure KeyVault
 # 6. post-deploy - Verify deployment
 # =====================================================
 
@@ -58,7 +58,7 @@ on:
         default: 'OIDC'
 
       content-type:
-        description: 'Content type for App Configuration values (application/json or application/vnd.microsoft.keyvault.keyvaultref+json;charset=utf-8)'
+        description: 'Content type for KeyVault values (application/json or application/vnd.microsoft.keyvault.keyvaultref+json;charset=utf-8)'
         required: false
         type: string
         default: 'application/json'
@@ -242,7 +242,7 @@ jobs:
       - name: Load environment configuration
         id: config
         run: |
-          # Load App Configuration resource name from config.yml for this environment
+          # Load KeyVault resource name from config.yml for this environment
           CONFIG_FILE="${{ inputs.config-file-path }}"
           
           if [ -f "$CONFIG_FILE" ]; then
@@ -269,7 +269,7 @@ jobs:
           
           echo "keyvault-name=${keyvault_NAME}" >> $GITHUB_OUTPUT
           echo "resource-group=${RESOURCE_GROUP}" >> $GITHUB_OUTPUT
-          echo "::notice::App Configuration: ${keyvault_NAME} in Resource Group: ${RESOURCE_GROUP}"
+          echo "::notice::KeyVault: ${keyvault_NAME} in Resource Group: ${RESOURCE_GROUP}"
 
       - name: Resolve Artifactory URL
         id: resolve-artifactory
@@ -403,7 +403,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Install Azure App Configuration extension
+      - name: Install Azure KeyVault extension
         run: |
           az extension add --name keyvault --yes || az extension update --name keyvault
 
@@ -416,7 +416,7 @@ jobs:
           RESOURCE_GROUP="${{ needs.prepare.outputs.resource-group }}"
           DATA_FILE="./deployment/data.json"
           
-          echo "App Configuration: ${keyvault_NAME}"
+          echo "KeyVault: ${keyvault_NAME}"
           echo "Resource Group: ${RESOURCE_GROUP}"
           echo "Data File: ${DATA_FILE}"
           echo ""
@@ -481,7 +481,7 @@ jobs:
           ## Target Resource
           | Property | Value |
           |----------|-------|
-          | **App Configuration** | ${{ needs.prepare.outputs.keyvault-name }} |
+          | **KeyVault** | ${{ needs.prepare.outputs.keyvault-name }} |
           | **Resource Group** | ${{ needs.prepare.outputs.resource-group }} |
           | **Environment** | ${{ env.ENVIRONMENT_UPPER }} |
           
@@ -501,7 +501,7 @@ jobs:
   # Stage 4: Deploy
   # =====================================================
   deploy:
-    name: Deploy to App Configuration
+    name: Deploy to KeyVault
     runs-on:
       group: sh-dso-snbx-cd-local-001
       labels: [agent-snbx-001]
@@ -525,11 +525,11 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Install Azure App Configuration extension
+      - name: Install Azure KeyVault extension
         run: |
           az extension add --name keyvault --yes || az extension update --name keyvault
 
-      - name: Import configuration to Azure App Configuration
+      - name: Import configuration to Azure KeyVault
         id: import
         run: |
           echo "::group::Importing configuration"
@@ -633,7 +633,7 @@ jobs:
           ## Target Resource
           | Property | Value |
           |----------|-------|
-          | **App Configuration** | ${{ needs.prepare.outputs.keyvault-name }} |
+          | **KeyVault** | ${{ needs.prepare.outputs.keyvault-name }} |
           | **Resource Group** | ${{ needs.prepare.outputs.resource-group }} |
           
           ## Import Settings

@@ -1,12 +1,12 @@
 # Azure KeyVault Reusable Workflows
 
-Enterprise-grade GitHub Actions reusable workflows for managing Azure App Configuration deployments with CI/CD automation, security scanning, and artifact management.
+Enterprise-grade GitHub Actions reusable workflows for managing Azure KeyVault deployments with CI/CD automation, security scanning, and artifact management.
 
 ## Overview
 
 This repository provides reusable workflows for:
-- **CI**: Validate, package, and publish App Configuration changes to Artifactory
-- **CD**: Deploy configuration to Azure App Configuration with dry-run preview
+- **CI**: Validate, package, and publish KeyVault changes to Artifactory
+- **CD**: Deploy configuration to Azure KeyVault with dry-run preview
 - **Rollback**: Restore previous configuration versions
 
 ### Key Features
@@ -97,7 +97,7 @@ Copy workflows from `caller-examples/` to your repository's `.github/workflows/`
 
 **CI Workflow** (`.github/workflows/ci.yml`):
 ```yaml
-name: CI - App Configuration
+name: CI - KeyVault
 
 on:
   push:
@@ -115,7 +115,7 @@ jobs:
 
 **CD Workflow** (`.github/workflows/cd-dev.yml`):
 ```yaml
-name: CD - App Configuration (DEV)
+name: CD - KeyVault (DEV)
 
 on:
   workflow_dispatch:
@@ -141,7 +141,7 @@ jobs:
 
 ### CI Workflow: `_ci-keyvault.yml`
 
-Validates, packages, and publishes App Configuration changes.
+Validates, packages, and publishes KeyVault changes.
 
 #### Inputs
 
@@ -171,7 +171,7 @@ Validates, packages, and publishes App Configuration changes.
 
 ### CD Workflows: `_cd-keyvault-{env}.yml`
 
-Deploy configuration to Azure App Configuration.
+Deploy configuration to Azure KeyVault.
 
 #### Inputs (Common)
 
@@ -227,7 +227,7 @@ Deploy configuration to Azure App Configuration.
 ### Prerequisites
 
 1. **Azure AD Application** with federated credentials for GitHub Actions
-2. **App Configuration Data Owner** role on Azure App Configuration resources
+2. **KeyVault Data Owner** role on Azure KeyVault resources
 3. **Resource Group Reader** role on resource groups
 
 ### Setting Up OIDC
@@ -258,7 +258,7 @@ az ad app federated-credential create \
 ```bash
 az role assignment create \
   --assignee <app-id> \
-  --role "App Configuration Data Owner" \
+  --role "KeyVault Data Owner" \
   --scope /subscriptions/<sub-id>/resourceGroups/<rg>/providers/Microsoft.keyvaulturation/configurationStores/<name>
 ```
 
@@ -309,17 +309,17 @@ Configure this repository/organization variable:
 
 2. **DEV**: Trigger CD DEV workflow (optional)
    - Input version from CI output
-   - Deploys to DEV App Configuration
+   - Deploys to DEV KeyVault
 
 3. **UAT**: Trigger CD UAT workflow
    - Input version from CI output
-   - Deploys to UAT App Configuration
+   - Deploys to UAT KeyVault
    - Creates git tag (e.g., `1.0.0-42`)
 
 4. **PRD**: Trigger CD PRD workflow
    - Input release version (e.g., `1.0.0`)
    - Requires manual approval
-   - Deploys to PRD App Configuration
+   - Deploys to PRD KeyVault
    - Creates release tag and GitHub Release
 
 ### Rollback
@@ -349,9 +349,9 @@ Configure this repository/organization variable:
 - Verify Azure AD Application federated credentials
 - Check subject claim matches repository and branch
 
-**"Access denied to App Configuration"**
-- Verify service principal has "App Configuration Data Owner" role
-- Check scope includes the target App Configuration resource
+**"Access denied to KeyVault"**
+- Verify service principal has "KeyVault Data Owner" role
+- Check scope includes the target KeyVault resource
 
 ### Debug Mode
 

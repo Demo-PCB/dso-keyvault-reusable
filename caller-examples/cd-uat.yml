@@ -1,5 +1,5 @@
 # =====================================================
-# Caller Workflow: CD UAT - Azure App Configuration
+# Caller Workflow: CD UAT - Azure KeyVault
 # =====================================================
 # Deploys configuration to the UAT environment.
 # Creates a git tag after successful deployment.
@@ -10,7 +10,7 @@
 # - Azure OIDC credentials configured for UAT environment
 # =====================================================
 
-name: CD - App Configuration (UAT)
+name: CD - KeyVault (UAT)
 
 on:
   workflow_dispatch:

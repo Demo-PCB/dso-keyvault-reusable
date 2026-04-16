@@ -1,20 +1,20 @@
 # =====================================================
-# Composite Action: App Configuration Dry Run
+# Composite Action: KeyVault Dry Run
 # =====================================================
-# Performs a dry run preview of App Configuration import.
+# Performs a dry run preview of KeyVault import.
 # Shows current configuration and changes that will be applied.
 #
 # Prerequisites:
 # - Azure CLI logged in with appropriate permissions
-# - App Configuration extension installed
+# - KeyVault extension installed
 # =====================================================
 
-name: 'App Configuration Dry Run'
-description: 'Preview changes before importing to Azure App Configuration'
+name: 'KeyVault Dry Run'
+description: 'Preview changes before importing to Azure KeyVault'
 
 inputs:
   appconfig-name:
-    description: 'Azure App Configuration resource name'
+    description: 'Azure KeyVault resource name'
     required: true
 
   resource-group:
@@ -62,7 +62,7 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Install Azure App Configuration extension
+    - name: Install Azure KeyVault extension
       shell: bash
       run: |
         az extension add --name appconfig --yes || az extension update --name appconfig
@@ -77,7 +77,7 @@ runs:
         RESOURCE_GROUP="${{ inputs.resource-group }}"
         DATA_FILE="${{ inputs.data-file-path }}"
         
-        echo "App Configuration: ${APPCONFIG_NAME}"
+        echo "KeyVault: ${APPCONFIG_NAME}"
         echo "Resource Group: ${RESOURCE_GROUP}"
         echo "Data File: ${DATA_FILE}"
         echo ""
@@ -150,7 +150,7 @@ runs:
         
         | Property | Value |
         |----------|-------|
-        | **App Configuration** | ${{ inputs.appconfig-name }} |
+        | **KeyVault** | ${{ inputs.appconfig-name }} |
         | **Resource Group** | ${{ inputs.resource-group }} |
         | **Environment** | ${ENV_DISPLAY} |
         | **Keys to Import** | ${{ steps.dry-run.outputs.key-count }} |

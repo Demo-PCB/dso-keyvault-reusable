@@ -1,7 +1,7 @@
 # =====================================================
-# Rollback Reusable Workflow - Azure App Configuration (PRD)
+# Rollback Reusable Workflow - Azure KeyVault (PRD)
 # =====================================================
-# This workflow rolls back Production App Configuration to a previous version.
+# This workflow rolls back Production KeyVault to a previous version.
 # Requires manual approval before executing rollback.
 #
 # Workflow stages:
@@ -41,7 +41,7 @@ on:
         default: ${{ github.event.repository.name }}
 
       content-type:
-        description: 'Content type for App Configuration values'
+        description: 'Content type for KeyVault values'
         required: false
         type: string
         default: 'application/json'
@@ -251,7 +251,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Install Azure App Configuration extension
+      - name: Install Azure KeyVault extension
         run: az extension add --name keyvault --yes || az extension update --name keyvault
 
       - name: Preview rollback changes
@@ -303,7 +303,7 @@ jobs:
           | Property | Value |
           |----------|-------|
           | **Target Version** | \`${{ inputs.version }}\` |
-          | **App Configuration** | ${{ needs.prepare.outputs.keyvault-name }} |
+          | **KeyVault** | ${{ needs.prepare.outputs.keyvault-name }} |
           | **Change Order** | ${{ inputs.change-order || 'N/A' }} |
           
           ✅ Dry run completed. Ready to rollback production.
@@ -334,7 +334,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Install Azure App Configuration extension
+      - name: Install Azure KeyVault extension
         run: az extension add --name keyvault --yes || az extension update --name keyvault
 
       - name: Execute rollback
@@ -399,7 +399,7 @@ jobs:
           | **Rollback Version** | \`${{ inputs.version }}\` |
           | **Environment** | ${{ env.ENVIRONMENT_UPPER }} |
           | **Status** | ${STATUS} |
-          | **App Configuration** | ${{ needs.prepare.outputs.keyvault-name }} |
+          | **KeyVault** | ${{ needs.prepare.outputs.keyvault-name }} |
           
           ## Change Management
           | Property | Value |

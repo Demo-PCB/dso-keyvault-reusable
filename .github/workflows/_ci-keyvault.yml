@@ -1,8 +1,8 @@
 # =====================================================
-# CI Reusable Workflow - Azure App Configuration
+# CI Reusable Workflow - Azure KeyVault
 # =====================================================
-# This workflow validates, packages, and publishes App Configuration changes
-# to Artifactory for subsequent deployment to Azure App Configuration resources.
+# This workflow validates, packages, and publishes KeyVault changes
+# to Artifactory for subsequent deployment to Azure KeyVault resources.
 #
 # Workflow stages:
 # 1. prepare - Checkout, validate inputs, calculate version
@@ -135,7 +135,7 @@ jobs:
           fetch-depth: 0
 
       - name: Load workflow configs
-        uses: ibkpe-platform-org/dso-commons-reusable/.github/actions/load-workflows-configs@main
+        uses: armedinag/dso-commons-reusable/.github/actions/load-workflows-configs@main
         with:
           application: ${{ inputs.application }}
           component-name: ${{ inputs.component-name }}
@@ -503,7 +503,7 @@ jobs:
           ARTIFACT_NAME="${{ needs.prepare.outputs.artifact-name }}"
           
           cat >> $GITHUB_STEP_SUMMARY << EOF
-          # CI Build Summary - Azure App Configuration
+          # CI Build Summary - Azure KeyVault
           
           ## Build Information
           | Property | Value |
@@ -531,7 +531,7 @@ jobs:
           Version to deploy: ${VERSION}
           \`\`\`
           
-          1. **DEV**: Trigger \`CD - App Configuration DEV\` workflow with version \`${VERSION}\`
-          2. **UAT**: Trigger \`CD - App Configuration UAT\` workflow with version \`${VERSION}\`
-          3. **PRD**: Trigger \`CD - App Configuration PRD\` workflow (requires approval)
+          1. **DEV**: Trigger \`CD - KeyVault DEV\` workflow with version \`${VERSION}\`
+          2. **UAT**: Trigger \`CD - KeyVault UAT\` workflow with version \`${VERSION}\`
+          3. **PRD**: Trigger \`CD - KeyVault PRD\` workflow (requires approval)
           EOF

@@ -1,19 +1,19 @@
 # =====================================================
-# Composite Action: App Configuration Import
+# Composite Action: KeyVault Import
 # =====================================================
-# Imports configuration data into Azure App Configuration.
+# Imports configuration data into Azure KeyVault.
 #
 # Prerequisites:
 # - Azure CLI logged in with appropriate permissions
-# - App Configuration extension installed
+# - KeyVault extension installed
 # =====================================================
 
-name: 'App Configuration Import'
-description: 'Import configuration into Azure App Configuration'
+name: 'KeyVault Import'
+description: 'Import configuration into Azure KeyVault'
 
 inputs:
   appconfig-name:
-    description: 'Azure App Configuration resource name'
+    description: 'Azure KeyVault resource name'
     required: true
 
   data-file-path:
@@ -21,7 +21,7 @@ inputs:
     required: true
 
   content-type:
-    description: 'Content type for App Configuration values'
+    description: 'Content type for KeyVault values'
     required: false
     default: 'application/json'
 
@@ -62,12 +62,12 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Install Azure App Configuration extension
+    - name: Install Azure KeyVault extension
       shell: bash
       run: |
         az extension add --name appconfig --yes || az extension update --name appconfig
 
-    - name: Import configuration to Azure App Configuration
+    - name: Import configuration to Azure KeyVault
       id: import
       shell: bash
       run: |

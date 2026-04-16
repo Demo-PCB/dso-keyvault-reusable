@@ -1,5 +1,5 @@
 # =====================================================
-# Caller Workflow: CD DEV - Azure App Configuration
+# Caller Workflow: CD DEV - Azure KeyVault
 # =====================================================
 # Deploys configuration to the DEV environment.
 # Trigger manually via workflow_dispatch.
@@ -9,7 +9,7 @@
 # - Azure OIDC credentials configured for DEV environment
 # =====================================================
 
-name: CD - App Configuration (DEV)
+name: CD - KeyVault (DEV)
 
 on:
   workflow_dispatch:

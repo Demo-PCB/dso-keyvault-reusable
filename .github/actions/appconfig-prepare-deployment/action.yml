@@ -1,17 +1,17 @@
 # =====================================================
-# Composite Action: App Configuration Prepare Deployment
+# Composite Action: KeyVault Prepare Deployment
 # =====================================================
 # Prepares the deployment environment by loading configuration
-# for the target Azure App Configuration resource.
+# for the target Azure KeyVault resource.
 #
 # Outputs:
-# - appconfig-name: Azure App Configuration resource name
+# - appconfig-name: Azure KeyVault resource name
 # - resource-group: Azure Resource Group name
 # - artifact-name: Name of the artifact to download
 # - artifact-path: Full Artifactory path to the artifact
 # =====================================================
 
-name: 'App Configuration Prepare Deployment'
+name: 'KeyVault Prepare Deployment'
 description: 'Prepares deployment by loading environment-specific configuration'
 
 inputs:
@@ -38,7 +38,7 @@ inputs:
 
 outputs:
   appconfig-name:
-    description: 'Azure App Configuration resource name'
+    description: 'Azure KeyVault resource name'
     value: ${{ steps.config.outputs.appconfig-name }}
 
   resource-group:
@@ -119,4 +119,4 @@ runs:
         
         echo "appconfig-name=${APPCONFIG_NAME}" >> $GITHUB_OUTPUT
         echo "resource-group=${RESOURCE_GROUP}" >> $GITHUB_OUTPUT
-        echo "::notice::App Configuration: ${APPCONFIG_NAME} in Resource Group: ${RESOURCE_GROUP}"
+        echo "::notice::KeyVault: ${APPCONFIG_NAME} in Resource Group: ${RESOURCE_GROUP}"

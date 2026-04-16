@@ -1,5 +1,5 @@
 # =====================================================
-# Caller Workflow: Rollback PRD - Azure App Configuration
+# Caller Workflow: Rollback PRD - Azure KeyVault
 # =====================================================
 # Rolls back production configuration to a previous version.
 # Requires manual approval before rollback.
@@ -11,7 +11,7 @@
 # - GitHub environment 'prd-rollback' with protection rules configured
 # =====================================================
 
-name: Rollback - App Configuration (PRD)
+name: Rollback - KeyVault (PRD)
 
 on:
   workflow_dispatch:

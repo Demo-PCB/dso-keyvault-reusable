@@ -1,7 +1,7 @@
 # =====================================================
-# CD Reusable Workflow - Azure App Configuration (PRD)
+# CD Reusable Workflow - Azure KeyVault (PRD)
 # =====================================================
-# This workflow deploys App Configuration changes to the PRD (Production) environment.
+# This workflow deploys KeyVault changes to the PRD (Production) environment.
 # Production deployment requires manual approval before proceeding.
 #
 # Workflow stages:
@@ -10,7 +10,7 @@
 # 3. download-artifact - Retrieve artifact from Artifactory
 # 4. azure-login - Authenticate using OIDC Managed Identity
 # 5. dry-run - Preview changes using AZ CLI (non-destructive)
-# 6. deploy - Import configuration to Azure App Configuration
+# 6. deploy - Import configuration to Azure KeyVault
 # 7. post-deploy - Verify deployment
 # 8. create-release-tag - Create clean release version tag
 # =====================================================
@@ -61,7 +61,7 @@ on:
         default: ''
 
       content-type:
-        description: 'Content type for App Configuration values'
+        description: 'Content type for KeyVault values'
         required: false
         type: string
         default: 'application/json'
@@ -306,7 +306,7 @@ jobs:
           
           echo "keyvault-name=${keyvault_NAME}" >> $GITHUB_OUTPUT
           echo "resource-group=${RESOURCE_GROUP}" >> $GITHUB_OUTPUT
-          echo "::notice::App Configuration: ${keyvault_NAME} in Resource Group: ${RESOURCE_GROUP}"
+          echo "::notice::KeyVault: ${keyvault_NAME} in Resource Group: ${RESOURCE_GROUP}"
 
       - name: Validate change order (if required)
         if: ${{ inputs.change-order != '' }}
@@ -472,7 +472,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Install Azure App Configuration extension
+      - name: Install Azure KeyVault extension
         run: |
           az extension add --name keyvault --yes || az extension update --name keyvault
 
@@ -485,7 +485,7 @@ jobs:
           RESOURCE_GROUP="${{ needs.prepare.outputs.resource-group }}"
           DATA_FILE="./deployment/data.json"
           
-          echo "App Configuration: ${keyvault_NAME}"
+          echo "KeyVault: ${keyvault_NAME}"
           echo "Resource Group: ${RESOURCE_GROUP}"
           echo ""
           
@@ -547,7 +547,7 @@ jobs:
           ## Target Resource
           | Property | Value |
           |----------|-------|
-          | **App Configuration** | ${{ needs.prepare.outputs.keyvault-name }} |
+          | **KeyVault** | ${{ needs.prepare.outputs.keyvault-name }} |
           | **Resource Group** | ${{ needs.prepare.outputs.resource-group }} |
           | **Environment** | ${{ env.ENVIRONMENT_UPPER }} |
           | **Change Order** | ${{ inputs.change-order || 'N/A' }} |
@@ -559,7 +559,7 @@ jobs:
   # Stage 5: Deploy
   # =====================================================
   deploy:
-    name: Deploy to App Configuration
+    name: Deploy to KeyVault
     runs-on:
       group: sh-dso-snbx-cd-local-001
       labels: [agent-snbx-001]
@@ -583,11 +583,11 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Install Azure App Configuration extension
+      - name: Install Azure KeyVault extension
         run: |
           az extension add --name keyvault --yes || az extension update --name keyvault
 
-      - name: Import configuration to Azure App Configuration
+      - name: Import configuration to Azure KeyVault
         id: import
         run: |
           echo "::group::Importing configuration"
@@ -709,7 +709,7 @@ jobs:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: "Release ${{ inputs.version }}"
           body: |
-            ## App Configuration Release ${{ inputs.version }}
+            ## KeyVault Release ${{ inputs.version }}
             
             ### Deployment Information
             | Property | Value |
@@ -722,7 +722,7 @@ jobs:
             | **Keys Imported** | ${{ needs.deploy.outputs.keys-count }} |
             
             ### Target Resource
-            - **App Configuration**: ${{ needs.prepare.outputs.keyvault-name }}
+            - **KeyVault**: ${{ needs.prepare.outputs.keyvault-name }}
             - **Resource Group**: ${{ needs.prepare.outputs.resource-group }}
           draft: false
           prerelease: false
@@ -768,7 +768,7 @@ jobs:
           ## Target Resource
           | Property | Value |
           |----------|-------|
-          | **App Configuration** | ${{ needs.prepare.outputs.keyvault-name }} |
+          | **KeyVault** | ${{ needs.prepare.outputs.keyvault-name }} |
           | **Resource Group** | ${{ needs.prepare.outputs.resource-group }} |
           
           ## Audit Trail

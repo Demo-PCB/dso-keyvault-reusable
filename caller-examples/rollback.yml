@@ -1,5 +1,5 @@
 # =====================================================
-# Caller Workflow: Rollback - Azure App Configuration
+# Caller Workflow: Rollback - Azure KeyVault
 # =====================================================
 # Rolls back configuration to a previous version.
 # Use for DEV and UAT environments.
@@ -10,7 +10,7 @@
 # - Azure OIDC credentials configured for target environment
 # =====================================================
 
-name: Rollback - App Configuration
+name: Rollback - KeyVault
 
 on:
   workflow_dispatch:
