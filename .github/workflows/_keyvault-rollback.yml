@@ -1,0 +1,368 @@
+# =====================================================
+# Rollback Reusable Workflow - Azure App Configuration
+# =====================================================
+# This workflow rolls back App Configuration to a previous version.
+# Can be used for DEV and UAT environments.
+#
+# Workflow stages:
+# 1. prepare - Load configs, validate inputs
+# 2. download-artifact - Retrieve previous version artifact from Artifactory
+# 3. azure-login - Authenticate using OIDC Managed Identity
+# 4. dry-run - Preview rollback changes
+# 5. rollback - Import previous configuration
+# 6. post-rollback - Verify rollback
+# =====================================================
+
+name: Rollback - Azure KeyVault
+
+on:
+  workflow_call:
+    inputs:
+      # =====================================================
+      # Required Inputs
+      # =====================================================
+      application:
+        description: 'Application name'
+        required: true
+        type: string
+
+      version:
+        description: 'Version to rollback to (e.g., 1.0.0-41)'
+        required: true
+        type: string
+
+      environment:
+        description: 'Target environment for rollback'
+        required: true
+        type: string
+
+      # =====================================================
+      # Optional Inputs
+      # =====================================================
+      component-name:
+        description: 'Component name (default: repository name)'
+        required: false
+        type: string
+        default: ${{ github.event.repository.name }}
+
+      content-type:
+        description: 'Content type for App Configuration values'
+        required: false
+        type: string
+        default: 'application/json'
+
+      label:
+        description: 'Label for configuration keys'
+        required: false
+        type: string
+        default: ''
+
+      separator:
+        description: 'Separator for flattening nested JSON keys'
+        required: false
+        type: string
+        default: ':'
+
+      prefix:
+        description: 'Prefix for all imported keys'
+        required: false
+        type: string
+        default: ''
+
+      # =====================================================
+      # Feature Flags
+      # =====================================================
+      FLAG_DRY_RUN_ONLY:
+        description: 'When true, only perform dry run without actual rollback'
+        required: false
+        type: boolean
+        default: false
+
+    secrets:
+      DSO_ARTIFACTORY_TOKEN:
+        required: true
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+
+    outputs:
+      rollback-status:
+        description: 'Rollback status'
+        value: ${{ jobs.rollback.outputs.status }}
+
+jobs:
+  # =====================================================
+  # Stage 1: Prepare
+  # =====================================================
+  prepare:
+    name: Prepare Rollback
+    runs-on: ubuntu-latest
+    outputs:
+      lower-app-name: ${{ steps.names.outputs.lower-app-name }}
+      artifact-name: ${{ steps.artifact.outputs.artifact-name }}
+      artifact-path: ${{ steps.artifact.outputs.artifact-path }}
+      keyvault-name: ${{ steps.config.outputs.keyvault-name }}
+      resource-group: ${{ steps.config.outputs.resource-group }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate application name variants
+        id: names
+        run: |
+          LOWER_APP_NAME=$(echo "${{ inputs.application }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+          echo "lower-app-name=${LOWER_APP_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Calculate artifact details
+        id: artifact
+        run: |
+          ARTIFACT_NAME="${{ inputs.component-name }}-keyvault-${{ inputs.version }}"
+          LOWER_APP=$(echo "${{ inputs.application }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+          PREFIX=$(echo "${{ inputs.application }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+          case "${{ inputs.environment }}" in
+            dev) ARTIFACTORY_REPO="${PREFIX}-generic-snapshot" ;;
+            uat|stg) ARTIFACTORY_REPO="${PREFIX}-generic-rc" ;;
+            *) ARTIFACTORY_REPO="${PREFIX}-generic-snapshot" ;;
+          esac
+          ARTIFACT_PATH="${ARTIFACTORY_REPO}/${LOWER_APP}/${{ inputs.component-name }}/${{ inputs.version }}/${ARTIFACT_NAME}.zip"
+          
+          echo "artifact-name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+          echo "artifact-path=${ARTIFACT_PATH}" >> $GITHUB_OUTPUT
+
+      - name: Load environment configuration
+        id: config
+        run: |
+          CONFIG_FILE="config.yml"
+          ENV="${{ inputs.environment }}"
+          
+          if [ -f "$CONFIG_FILE" ]; then
+            keyvault_NAME=$(grep -A5 "^${ENV}:" "$CONFIG_FILE" | grep "keyvault-name:" | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'" || true)
+            RESOURCE_GROUP=$(grep -A5 "^${ENV}:" "$CONFIG_FILE" | grep "resource-group:" | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'" || true)
+            
+            if [ -z "$keyvault_NAME" ] || [ -z "$RESOURCE_GROUP" ]; then
+              echo "::error::Configuration not found for environment ${ENV}"
+              exit 1
+            fi
+          else
+            echo "::error::config.yml not found"
+            exit 1
+          fi
+          
+          echo "keyvault-name=${keyvault_NAME}" >> $GITHUB_OUTPUT
+          echo "resource-group=${RESOURCE_GROUP}" >> $GITHUB_OUTPUT
+
+  # =====================================================
+  # Stage 2: Download Artifact
+  # =====================================================
+  download-artifact:
+    name: Download Previous Version
+    runs-on: ubuntu-latest
+    needs: [prepare]
+
+    steps:
+      - name: Setup JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ vars.IBK_ARTIFACTORY_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.DSO_ARTIFACTORY_TOKEN }}
+
+      - name: Download artifact from Artifactory
+        run: |
+          ARTIFACT_PATH="${{ needs.prepare.outputs.artifact-path }}"
+          jf rt download "${ARTIFACT_PATH}" ./artifact/ --flat
+          
+          if [ ! -f "./artifact/${{ needs.prepare.outputs.artifact-name }}.zip" ]; then
+            echo "::error::Failed to download artifact"
+            exit 1
+          fi
+
+      - name: Extract artifact
+        run: |
+          cd artifact
+          unzip "${{ needs.prepare.outputs.artifact-name }}.zip" -d extracted
+
+      - name: Upload extracted artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: keyvault-rollback-${{ inputs.environment }}
+          path: artifact/extracted/
+          retention-days: 1
+
+  # =====================================================
+  # Stage 3: Dry Run
+  # =====================================================
+  dry-run:
+    name: Rollback Dry Run
+    runs-on: ubuntu-latest
+    needs: [prepare, download-artifact]
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: keyvault-rollback-${{ inputs.environment }}
+          path: ./deployment
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Azure App Configuration extension
+        run: az extension add --name keyvault --yes || az extension update --name keyvault
+
+      - name: Preview rollback changes
+        run: |
+          echo "::group::Rollback Dry Run"
+          
+          keyvault_NAME="${{ needs.prepare.outputs.keyvault-name }}"
+          DATA_FILE="./deployment/data.json"
+          
+          echo "Rolling back to version: ${{ inputs.version }}"
+          echo ""
+          
+          echo "### Configuration to restore:"
+          cat "${DATA_FILE}"
+          echo ""
+          
+          # Build dry-run command with --dry-run flag
+          echo "### Dry Run Rollback Preview:"
+          DRYRUN_CMD="az keyvault kv import \
+            --name ${keyvault_NAME} \
+            --source file \
+            --path ${DATA_FILE} \
+            --format json \
+            --separator '${{ inputs.separator }}' \
+            --dry-run"
+          
+          if [ -n "${{ inputs.label }}" ]; then
+            DRYRUN_CMD="${DRYRUN_CMD} --label '${{ inputs.label }}'"
+          fi
+          
+          if [ -n "${{ inputs.prefix }}" ]; then
+            DRYRUN_CMD="${DRYRUN_CMD} --prefix '${{ inputs.prefix }}'"
+          fi
+          
+          echo "Executing dry-run command: ${DRYRUN_CMD}"
+          echo ""
+          
+          # Execute dry-run to preview changes
+          eval ${DRYRUN_CMD} || echo "::warning::Dry run encountered issues"
+          
+          echo "::endgroup::"
+
+      - name: Generate Dry Run Summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # Rollback Dry Run - ${{ inputs.environment }}
+          
+          | Property | Value |
+          |----------|-------|
+          | **Target Version** | \`${{ inputs.version }}\` |
+          | **App Configuration** | ${{ needs.prepare.outputs.keyvault-name }} |
+          | **Environment** | ${{ inputs.environment }} |
+          
+          ✅ Dry run completed. Ready to rollback.
+          EOF
+
+  # =====================================================
+  # Stage 4: Rollback
+  # =====================================================
+  rollback:
+    name: Execute Rollback
+    runs-on: ubuntu-latest
+    needs: [prepare, download-artifact, dry-run]
+    if: ${{ inputs.FLAG_DRY_RUN_ONLY != true }}
+    outputs:
+      status: ${{ steps.rollback.outputs.status }}
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: keyvault-rollback-${{ inputs.environment }}
+          path: ./deployment
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Azure App Configuration extension
+        run: az extension add --name keyvault --yes || az extension update --name keyvault
+
+      - name: Execute rollback
+        id: rollback
+        run: |
+          keyvault_NAME="${{ needs.prepare.outputs.keyvault-name }}"
+          DATA_FILE="./deployment/data.json"
+          
+          IMPORT_CMD="az keyvault kv import \
+            --name ${keyvault_NAME} \
+            --source file \
+            --path ${DATA_FILE} \
+            --format json \
+            --separator '${{ inputs.separator }}' \
+            --content-type '${{ inputs.content-type }}' \
+            --yes"
+          
+          if [ -n "${{ inputs.label }}" ]; then
+            IMPORT_CMD="${IMPORT_CMD} --label '${{ inputs.label }}'"
+          fi
+          
+          if [ -n "${{ inputs.prefix }}" ]; then
+            IMPORT_CMD="${IMPORT_CMD} --prefix '${{ inputs.prefix }}'"
+          fi
+          
+          if eval ${IMPORT_CMD}; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "::notice::Rollback completed successfully"
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "::error::Rollback failed"
+            exit 1
+          fi
+
+      - name: Verify rollback
+        run: |
+          keyvault_NAME="${{ needs.prepare.outputs.keyvault-name }}"
+          az keyvault kv list --name "${keyvault_NAME}" --output table
+
+  # =====================================================
+  # Stage 5: Post Rollback
+  # =====================================================
+  post-rollback:
+    name: Post Rollback
+    runs-on: ubuntu-latest
+    needs: [prepare, rollback]
+    if: always()
+
+    steps:
+      - name: Generate Rollback Summary
+        run: |
+          STATUS="${{ needs.rollback.outputs.status || 'skipped' }}"
+          
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # Rollback Summary
+          
+          | Property | Value |
+          |----------|-------|
+          | **Application** | ${{ inputs.application }} |
+          | **Component** | ${{ inputs.component-name }} |
+          | **Rollback Version** | \`${{ inputs.version }}\` |
+          | **Environment** | ${{ inputs.environment }} |
+          | **Status** | ${STATUS} |
+          | **App Configuration** | ${{ needs.prepare.outputs.keyvault-name }} |
+          
+          ---
+          
+          ${{ needs.rollback.outputs.status == 'success' && '✅ Rollback completed successfully!' || needs.rollback.outputs.status == 'failed' && '❌ Rollback failed!' || '⏭️ Rollback was skipped' }}
+          EOF

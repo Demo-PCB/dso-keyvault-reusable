@@ -1,0 +1,113 @@
+# =====================================================
+# Composite Action: Prepare CI
+# =====================================================
+# Prepares the CI environment by checking out code, validating inputs,
+# and calculating version information.
+#
+# Outputs:
+# - version: Full version with run number (e.g., 1.0.0-42)
+# - project-version: Base version from config.yml
+# - artifact-name: Name for the artifact
+# - lower-app-name: Lowercase application name
+# - upper-app-name: Uppercase application name
+# - publish-artifacts: Whether to publish artifacts (true/false)
+# =====================================================
+
+name: 'Prepare CI'
+description: 'Prepares CI environment with checkout, version calculation, and config loading'
+
+inputs:
+  application:
+    description: 'Application name'
+    required: true
+
+  component-name:
+    description: 'Component name'
+    required: true
+
+  config-file-path:
+    description: 'Path to config.yml file'
+    required: false
+    default: 'config.yml'
+
+  run-number:
+    description: 'GitHub run number'
+    required: true
+
+  ref:
+    description: 'Git ref (branch/tag)'
+    required: true
+
+outputs:
+  version:
+    description: 'Full version with run number'
+    value: ${{ steps.version.outputs.version }}
+
+  project-version:
+    description: 'Base version from config.yml'
+    value: ${{ steps.version.outputs.project-version }}
+
+  artifact-name:
+    description: 'Artifact name'
+    value: ${{ steps.version.outputs.artifact-name }}
+
+  lower-app-name:
+    description: 'Lowercase application name'
+    value: ${{ steps.names.outputs.lower-app-name }}
+
+  upper-app-name:
+    description: 'Uppercase application name'
+    value: ${{ steps.names.outputs.upper-app-name }}
+
+  publish-artifacts:
+    description: 'Whether to publish artifacts'
+    value: ${{ steps.publish-check.outputs.publish }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate application name variants
+      id: names
+      shell: bash
+      run: |
+        LOWER_APP_NAME=$(echo "${{ inputs.application }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+        UPPER_APP_NAME=$(echo "${{ inputs.application }}" | tr '[:lower:]' '[:upper:]' | tr ' ' '_' | tr '-' '_')
+        echo "lower-app-name=${LOWER_APP_NAME}" >> $GITHUB_OUTPUT
+        echo "upper-app-name=${UPPER_APP_NAME}" >> $GITHUB_OUTPUT
+        echo "::notice::Application name variants - Lower: ${LOWER_APP_NAME}, Upper: ${UPPER_APP_NAME}"
+
+    - name: Extract version from config.yml
+      id: version
+      shell: bash
+      run: |
+        if [ -f "${{ inputs.config-file-path }}" ]; then
+          PROJECT_VERSION=$(grep -E '^version:' "${{ inputs.config-file-path }}" | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'")
+          if [ -z "$PROJECT_VERSION" ]; then
+            echo "::warning::No version found in config.yml, using default 1.0.0"
+            PROJECT_VERSION="1.0.0"
+          fi
+        else
+          echo "::warning::config.yml not found, using default version 1.0.0"
+          PROJECT_VERSION="1.0.0"
+        fi
+        
+        FULL_VERSION="${PROJECT_VERSION}-${{ inputs.run-number }}"
+        ARTIFACT_NAME="${{ inputs.component-name }}-appconfig-${FULL_VERSION}"
+        
+        echo "project-version=${PROJECT_VERSION}" >> $GITHUB_OUTPUT
+        echo "version=${FULL_VERSION}" >> $GITHUB_OUTPUT
+        echo "artifact-name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+        
+        echo "::notice::Version computed - Project: ${PROJECT_VERSION}, Full: ${FULL_VERSION}"
+
+    - name: Determine if artifacts should be published
+      id: publish-check
+      shell: bash
+      run: |
+        if [[ "${{ inputs.ref }}" == "refs/heads/main" ]] || [[ "${{ inputs.ref }}" == "refs/heads/develop" ]]; then
+          echo "publish=true" >> $GITHUB_OUTPUT
+          echo "::notice::Artifacts will be published (ref: ${{ inputs.ref }})"
+        else
+          echo "publish=false" >> $GITHUB_OUTPUT
+          echo "::notice::Artifacts will NOT be published (ref: ${{ inputs.ref }})"
+        fi

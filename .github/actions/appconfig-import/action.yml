@@ -1,0 +1,143 @@
+# =====================================================
+# Composite Action: App Configuration Import
+# =====================================================
+# Imports configuration data into Azure App Configuration.
+#
+# Prerequisites:
+# - Azure CLI logged in with appropriate permissions
+# - App Configuration extension installed
+# =====================================================
+
+name: 'App Configuration Import'
+description: 'Import configuration into Azure App Configuration'
+
+inputs:
+  appconfig-name:
+    description: 'Azure App Configuration resource name'
+    required: true
+
+  data-file-path:
+    description: 'Path to the data.json file to import'
+    required: true
+
+  content-type:
+    description: 'Content type for App Configuration values'
+    required: false
+    default: 'application/json'
+
+  label:
+    description: 'Label to apply to imported configuration keys'
+    required: false
+    default: ''
+
+  prefix:
+    description: 'Prefix to add to all imported keys'
+    required: false
+    default: ''
+
+  separator:
+    description: 'Separator for flattening nested JSON keys'
+    required: false
+    default: ':'
+
+  depth:
+    description: 'Depth for flattening nested JSON (0 = unlimited)'
+    required: false
+    default: '0'
+
+  skip-features:
+    description: 'Skip importing feature flags'
+    required: false
+    default: 'false'
+
+outputs:
+  status:
+    description: 'Import status (success/failed)'
+    value: ${{ steps.import.outputs.status }}
+
+  keys-count:
+    description: 'Number of configuration keys imported'
+    value: ${{ steps.import.outputs.keys-count }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Azure App Configuration extension
+      shell: bash
+      run: |
+        az extension add --name appconfig --yes || az extension update --name appconfig
+
+    - name: Import configuration to Azure App Configuration
+      id: import
+      shell: bash
+      run: |
+        echo "::group::Importing configuration"
+        
+        APPCONFIG_NAME="${{ inputs.appconfig-name }}"
+        DATA_FILE="${{ inputs.data-file-path }}"
+        
+        if [ ! -f "${DATA_FILE}" ]; then
+          echo "::error::Data file not found: ${DATA_FILE}"
+          echo "status=failed" >> $GITHUB_OUTPUT
+          echo "keys-count=0" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+        # Build import command
+        IMPORT_CMD="az appconfig kv import \
+          --name ${APPCONFIG_NAME} \
+          --source file \
+          --path ${DATA_FILE} \
+          --format json \
+          --separator '${{ inputs.separator }}' \
+          --content-type '${{ inputs.content-type }}' \
+          --yes"
+        
+        # Add optional parameters
+        if [ -n "${{ inputs.label }}" ]; then
+          IMPORT_CMD="${IMPORT_CMD} --label '${{ inputs.label }}'"
+        fi
+        
+        if [ -n "${{ inputs.prefix }}" ]; then
+          IMPORT_CMD="${IMPORT_CMD} --prefix '${{ inputs.prefix }}'"
+        fi
+        
+        if [ "${{ inputs.depth }}" != "0" ]; then
+          IMPORT_CMD="${IMPORT_CMD} --depth ${{ inputs.depth }}"
+        fi
+        
+        if [ "${{ inputs.skip-features }}" == "true" ]; then
+          IMPORT_CMD="${IMPORT_CMD} --skip-features"
+        fi
+        
+        echo "Executing: ${IMPORT_CMD}"
+        
+        # Execute import
+        if eval ${IMPORT_CMD}; then
+          echo "status=success" >> $GITHUB_OUTPUT
+          KEY_COUNT=$(jq 'keys | length' "${DATA_FILE}")
+          echo "keys-count=${KEY_COUNT}" >> $GITHUB_OUTPUT
+          echo "::notice::Successfully imported ${KEY_COUNT} configuration keys"
+        else
+          echo "status=failed" >> $GITHUB_OUTPUT
+          echo "keys-count=0" >> $GITHUB_OUTPUT
+          echo "::error::Failed to import configuration"
+          exit 1
+        fi
+        
+        echo "::endgroup::"
+
+    - name: Verify import
+      shell: bash
+      run: |
+        echo "::group::Verifying import"
+        
+        APPCONFIG_NAME="${{ inputs.appconfig-name }}"
+        
+        echo "Imported configuration keys:"
+        az appconfig kv list \
+          --name "${APPCONFIG_NAME}" \
+          ${{ inputs.label != '' && format('--label "{0}"', inputs.label) || '' }} \
+          --output table
+        
+        echo "::endgroup::"

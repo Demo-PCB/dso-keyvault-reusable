@@ -1,0 +1,95 @@
+# =====================================================
+# Caller Workflow: CD PRD - Azure App Configuration
+# =====================================================
+# Deploys configuration to the PRD (Production) environment.
+# Requires manual approval before deployment.
+# Creates a release tag after successful deployment.
+# Trigger manually via workflow_dispatch.
+#
+# Prerequisites:
+# - UAT deployment must have succeeded
+# - Azure OIDC credentials configured for PRD environment
+# - GitHub environment 'prd' with protection rules configured
+# =====================================================
+
+name: CD - App Configuration (PRD)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version to deploy (e.g., 1.0.0 - clean version without run-number)'
+        required: true
+        type: string
+      artifact-version:
+        description: 'Artifact version with run-number (e.g., 1.0.0-42). If empty, will look for matching UAT tag.'
+        required: false
+        type: string
+      change-order:
+        description: 'Change order/ticket number for audit trail (e.g., CHG0012345)'
+        required: false
+        type: string
+
+# Prevent concurrent deployments to PRD
+concurrency:
+  group: cd-appconfig-prd
+  cancel-in-progress: false
+
+jobs:
+  deploy-prd:
+    name: Deploy to PRD
+    # Reference format: {org}/{reusable-repo}/.github/workflows/{workflow-file}@{ref}
+    uses: ibkpe-platform-org/dso-appconfig-reusable/.github/workflows/_cd-appconfig-prd.yml@main
+    with:
+      # Required: Application name
+      application: 'my-application'
+      
+      # Required: Release version (clean version without run-number)
+      version: ${{ inputs.version }}
+      
+      # Optional: Artifact version with run-number (if not provided, looks for UAT tag)
+      artifact-version: ${{ inputs.artifact-version }}
+      
+      # Optional: Component name (defaults to repository name)
+      # component-name: 'my-component'
+
+      # Optional: Azure auth mode ('OIDC' default or 'IDENTITY' for user-assigned managed identity)
+      # azure-auth-type: 'IDENTITY'
+      
+      # Optional: Content type for values (default: 'application/json')
+      # content-type: 'application/json'
+      
+      # Optional: Label for configuration keys
+      # label: 'prd'
+      
+      # Optional: Prefix for all imported keys
+      # prefix: 'MyApp/'
+      
+      # Optional: Separator for flattening nested JSON (default: ':')
+      # separator: ':'
+      
+      # Optional: Change order for audit trail
+      change-order: ${{ inputs.change-order }}
+      
+      # Optional: Perform dry run only without actual import (default: false)
+      # FLAG_DRY_RUN_ONLY: false
+      
+      # Optional: Skip creating release git tag after deployment (default: false)
+      # FLAG_SKIP_RELEASE_TAG: false
+    secrets:
+      # Required: GitHub App credentials for centralized workflow configs
+      DSO_WORKFLOWS_GHAPP_ID: ${{ secrets.DSO_WORKFLOWS_GHAPP_ID }}
+      DSO_WORKFLOWS_GHAPP_PK: ${{ secrets.DSO_WORKFLOWS_GHAPP_PK }}
+
+      # Required: JFrog token (Artifactory URL comes from variable IBK_ARTIFACTORY_URL)
+      DSO_ARTIFACTORY_TOKEN: ${{ secrets.DSO_ARTIFACTORY_TOKEN }}
+      
+      # Required: Azure credentials for PRD environment
+      # - OIDC mode: requires federated credential configured in Entra ID
+      # - IDENTITY mode: user-assigned managed identity (client-id only, no secret needed)
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID_PRD }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID_PRD }}
+      
+      # Optional: GitHub token for creating git tags and releases (defaults to GITHUB_TOKEN)
+      # GIT_TOKEN: ${{ secrets.GIT_TOKEN }}

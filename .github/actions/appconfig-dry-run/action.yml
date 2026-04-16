@@ -1,0 +1,162 @@
+# =====================================================
+# Composite Action: App Configuration Dry Run
+# =====================================================
+# Performs a dry run preview of App Configuration import.
+# Shows current configuration and changes that will be applied.
+#
+# Prerequisites:
+# - Azure CLI logged in with appropriate permissions
+# - App Configuration extension installed
+# =====================================================
+
+name: 'App Configuration Dry Run'
+description: 'Preview changes before importing to Azure App Configuration'
+
+inputs:
+  appconfig-name:
+    description: 'Azure App Configuration resource name'
+    required: true
+
+  resource-group:
+    description: 'Azure Resource Group name'
+    required: true
+
+  data-file-path:
+    description: 'Path to the data.json file to import'
+    required: true
+
+  label:
+    description: 'Label to filter/apply to configuration keys'
+    required: false
+    default: ''
+
+  prefix:
+    description: 'Prefix to add to all imported keys'
+    required: false
+    default: ''
+
+  separator:
+    description: 'Separator for flattening nested JSON keys'
+    required: false
+    default: ':'
+
+  depth:
+    description: 'Depth for flattening nested JSON (0 = unlimited)'
+    required: false
+    default: '0'
+
+  environment:
+    description: 'Target environment name (for summary)'
+    required: false
+    default: ''
+
+outputs:
+  status:
+    description: 'Dry run status (success/failed)'
+    value: ${{ steps.dry-run.outputs.status }}
+
+  key-count:
+    description: 'Number of keys to be imported'
+    value: ${{ steps.dry-run.outputs.key-count }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Azure App Configuration extension
+      shell: bash
+      run: |
+        az extension add --name appconfig --yes || az extension update --name appconfig
+
+    - name: Preview configuration changes (Dry Run)
+      id: dry-run
+      shell: bash
+      run: |
+        echo "::group::Dry Run - Preview Changes"
+        
+        APPCONFIG_NAME="${{ inputs.appconfig-name }}"
+        RESOURCE_GROUP="${{ inputs.resource-group }}"
+        DATA_FILE="${{ inputs.data-file-path }}"
+        
+        echo "App Configuration: ${APPCONFIG_NAME}"
+        echo "Resource Group: ${RESOURCE_GROUP}"
+        echo "Data File: ${DATA_FILE}"
+        echo ""
+        
+        # Validate data file exists
+        if [ ! -f "${DATA_FILE}" ]; then
+          echo "::error::Data file not found: ${DATA_FILE}"
+          echo "status=failed" >> $GITHUB_OUTPUT
+          echo "key-count=0" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+        # Count keys to be imported
+        KEY_COUNT=$(jq 'keys | length' "${DATA_FILE}")
+        
+        echo "### Configuration to be imported:"
+        cat "${DATA_FILE}"
+        echo ""
+        
+        # Build dry-run command with --dry-run flag
+        echo "### Dry Run Import Preview:"
+        DRYRUN_CMD="az appconfig kv import \
+          --name ${APPCONFIG_NAME} \
+          --source file \
+          --path ${DATA_FILE} \
+          --format json \
+          --separator '${{ inputs.separator }}' \
+          --dry-run"
+        
+        if [ -n "${{ inputs.label }}" ]; then
+          DRYRUN_CMD="${DRYRUN_CMD} --label '${{ inputs.label }}'"
+        fi
+        
+        if [ -n "${{ inputs.prefix }}" ]; then
+          DRYRUN_CMD="${DRYRUN_CMD} --prefix '${{ inputs.prefix }}'"
+        fi
+        
+        if [ "${{ inputs.depth }}" != "0" ]; then
+          DRYRUN_CMD="${DRYRUN_CMD} --depth ${{ inputs.depth }}"
+        fi
+        
+        echo "Executing dry-run command: ${DRYRUN_CMD}"
+        echo ""
+        
+        # Execute dry-run to preview changes
+        if eval ${DRYRUN_CMD}; then
+          echo ""
+          echo "Keys to be imported: ${KEY_COUNT}"
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "key-count=${KEY_COUNT}" >> $GITHUB_OUTPUT
+        else
+          echo "::error::Dry run failed"
+          echo "status=failed" >> $GITHUB_OUTPUT
+          echo "key-count=0" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+        echo "::endgroup::"
+
+    - name: Generate Dry Run Summary
+      shell: bash
+      run: |
+        ENV_DISPLAY="${{ inputs.environment }}"
+        if [ -z "${ENV_DISPLAY}" ]; then
+          ENV_DISPLAY="N/A"
+        fi
+        
+        cat >> $GITHUB_STEP_SUMMARY << EOF
+        ## Dry Run Preview
+        
+        | Property | Value |
+        |----------|-------|
+        | **App Configuration** | ${{ inputs.appconfig-name }} |
+        | **Resource Group** | ${{ inputs.resource-group }} |
+        | **Environment** | ${ENV_DISPLAY} |
+        | **Keys to Import** | ${{ steps.dry-run.outputs.key-count }} |
+        | **Label** | ${{ inputs.label || '(none)' }} |
+        | **Prefix** | ${{ inputs.prefix || '(none)' }} |
+        | **Separator** | \`${{ inputs.separator }}\` |
+        
+        ✅ Dry run completed. Configuration is ready for import.
+        EOF

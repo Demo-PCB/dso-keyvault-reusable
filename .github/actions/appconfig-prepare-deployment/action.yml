@@ -1,0 +1,122 @@
+# =====================================================
+# Composite Action: App Configuration Prepare Deployment
+# =====================================================
+# Prepares the deployment environment by loading configuration
+# for the target Azure App Configuration resource.
+#
+# Outputs:
+# - appconfig-name: Azure App Configuration resource name
+# - resource-group: Azure Resource Group name
+# - artifact-name: Name of the artifact to download
+# - artifact-path: Full Artifactory path to the artifact
+# =====================================================
+
+name: 'App Configuration Prepare Deployment'
+description: 'Prepares deployment by loading environment-specific configuration'
+
+inputs:
+  application:
+    description: 'Application name'
+    required: true
+
+  component-name:
+    description: 'Component name'
+    required: true
+
+  version:
+    description: 'Version to deploy'
+    required: true
+
+  environment:
+    description: 'Target environment (dev/uat/prd)'
+    required: true
+
+  config-file-path:
+    description: 'Path to config.yml file'
+    required: false
+    default: 'config.yml'
+
+outputs:
+  appconfig-name:
+    description: 'Azure App Configuration resource name'
+    value: ${{ steps.config.outputs.appconfig-name }}
+
+  resource-group:
+    description: 'Azure Resource Group name'
+    value: ${{ steps.config.outputs.resource-group }}
+
+  artifact-name:
+    description: 'Artifact name'
+    value: ${{ steps.artifact.outputs.artifact-name }}
+
+  artifact-path:
+    description: 'Full Artifactory path to artifact'
+    value: ${{ steps.artifact.outputs.artifact-path }}
+
+  lower-app-name:
+    description: 'Lowercase application name'
+    value: ${{ steps.names.outputs.lower-app-name }}
+
+  upper-app-name:
+    description: 'Uppercase application name'
+    value: ${{ steps.names.outputs.upper-app-name }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate application name variants
+      id: names
+      shell: bash
+      run: |
+        LOWER_APP_NAME=$(echo "${{ inputs.application }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+        UPPER_APP_NAME=$(echo "${{ inputs.application }}" | tr '[:lower:]' '[:upper:]' | tr ' ' '_' | tr '-' '_')
+        echo "lower-app-name=${LOWER_APP_NAME}" >> $GITHUB_OUTPUT
+        echo "upper-app-name=${UPPER_APP_NAME}" >> $GITHUB_OUTPUT
+
+    - name: Calculate artifact details
+      id: artifact
+      shell: bash
+      run: |
+        ARTIFACT_NAME="${{ inputs.component-name }}-appconfig-${{ inputs.version }}"
+        LOWER_APP=$(echo "${{ inputs.application }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+        PREFIX=$(echo "${{ inputs.application }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+        case "${{ inputs.environment }}" in
+          dev) ARTIFACTORY_REPO="${PREFIX}-generic-snapshot" ;;
+          uat|stg) ARTIFACTORY_REPO="${PREFIX}-generic-rc" ;;
+          prd) ARTIFACTORY_REPO="${PREFIX}-generic-release" ;;
+          *) ARTIFACTORY_REPO="${PREFIX}-generic-snapshot" ;;
+        esac
+        ARTIFACT_PATH="${ARTIFACTORY_REPO}/${LOWER_APP}/${{ inputs.component-name }}/${{ inputs.version }}/${ARTIFACT_NAME}.zip"
+        
+        echo "artifact-name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+        echo "artifact-path=${ARTIFACT_PATH}" >> $GITHUB_OUTPUT
+        echo "::notice::Artifact path: ${ARTIFACT_PATH}"
+
+    - name: Load environment configuration
+      id: config
+      shell: bash
+      run: |
+        CONFIG_FILE="${{ inputs.config-file-path }}"
+        ENV="${{ inputs.environment }}"
+        
+        if [ -f "$CONFIG_FILE" ]; then
+          APPCONFIG_NAME=$(grep -A5 "^${ENV}:" "$CONFIG_FILE" | grep "appconfig-name:" | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'" || true)
+          RESOURCE_GROUP=$(grep -A5 "^${ENV}:" "$CONFIG_FILE" | grep "resource-group:" | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'" || true)
+          
+          if [ -z "$APPCONFIG_NAME" ]; then
+            echo "::error::No appconfig-name found for environment ${ENV} in config.yml"
+            exit 1
+          fi
+          
+          if [ -z "$RESOURCE_GROUP" ]; then
+            echo "::error::No resource-group found for environment ${ENV} in config.yml"
+            exit 1
+          fi
+        else
+          echo "::error::config.yml not found at ${CONFIG_FILE}"
+          exit 1
+        fi
+        
+        echo "appconfig-name=${APPCONFIG_NAME}" >> $GITHUB_OUTPUT
+        echo "resource-group=${RESOURCE_GROUP}" >> $GITHUB_OUTPUT
+        echo "::notice::App Configuration: ${APPCONFIG_NAME} in Resource Group: ${RESOURCE_GROUP}"

@@ -1,0 +1,650 @@
+# =====================================================
+# CD Reusable Workflow - Azure App Configuration (DEV)
+# =====================================================
+# This workflow deploys App Configuration changes to the DEV environment.
+#
+# Workflow stages:
+# 1. prepare - Load configs, validate inputs
+# 2. download-artifact - Retrieve artifact from Artifactory
+# 3. azure-login - Authenticate using OIDC federated token
+# 4. dry-run - Preview changes using AZ CLI (non-destructive)
+# 5. deploy - Import configuration to Azure App Configuration
+# 6. post-deploy - Verify deployment
+# =====================================================
+
+name: CD - Azure KeyVault (DEV)
+
+on:
+  workflow_call:
+    inputs:
+      # =====================================================
+      # Required Inputs
+      # =====================================================
+      application:
+        description: 'Application name for deployment'
+        required: true
+        type: string
+
+      version:
+        description: 'Artifact version to deploy (e.g., 1.0.0-42 from CI job summary output)'
+        required: true
+        type: string
+
+      # =====================================================
+      # Optional Inputs
+      # =====================================================
+      component-name:
+        description: 'Component name (default: repository name)'
+        required: false
+        type: string
+        default: ${{ github.event.repository.name }}
+
+      config-file-path:
+        description: 'Path to config.yml file (default: keyvault/config.yml)'
+        required: false
+        type: string
+        default: 'keyvault/config.yml'
+
+      artifactory-url:
+        description: 'Optional Artifactory URL override. If empty, tries workflow configs, vars.IBK_ARTIFACTORY_URL, then secrets.ARTIFACTORY_URL'
+        required: false
+        type: string
+        default: ''
+
+      azure-auth-type:
+        description: 'Deprecated. Authentication uses OIDC federated token.'
+        required: false
+        type: string
+        default: 'OIDC'
+
+      content-type:
+        description: 'Content type for App Configuration values (application/json or application/vnd.microsoft.keyvault.keyvaultref+json;charset=utf-8)'
+        required: false
+        type: string
+        default: 'application/json'
+
+      label:
+        description: 'Label to apply to imported configuration keys'
+        required: false
+        type: string
+        default: ''
+
+      separator:
+        description: 'Separator for flattening nested JSON keys (default: :)'
+        required: false
+        type: string
+        default: ':'
+
+      depth:
+        description: 'Depth for flattening nested JSON (default: unlimited)'
+        required: false
+        type: number
+        default: 0
+
+      prefix:
+        description: 'Prefix to add to all imported keys'
+        required: false
+        type: string
+        default: ''
+
+      skip-features:
+        description: 'Skip importing feature flags'
+        required: false
+        type: boolean
+        default: false
+
+      # =====================================================
+      # Feature Flags
+      # =====================================================
+      FLAG_DRY_RUN_ONLY:
+        description: 'When true, only perform dry run without actual import'
+        required: false
+        type: boolean
+        default: false
+
+      FLAG_STRICT_MODE:
+        description: 'When true, fail on any warnings during import'
+        required: false
+        type: boolean
+        default: false
+
+    secrets:
+      # =====================================================
+      # Required Secrets - Workflow Configs
+      # =====================================================
+      DSO_WORKFLOWS_GHAPP_ID:
+        description: 'GitHub App ID used to read centralized workflow configs'
+        required: true
+
+      DSO_WORKFLOWS_GHAPP_PK:
+        description: 'GitHub App private key used to read centralized workflow configs'
+        required: true
+
+      # =====================================================
+      # Required Secrets - Artifactory
+      # =====================================================
+      DSO_ARTIFACTORY_TOKEN:
+        description: 'Artifactory token for authentication'
+        required: true
+
+      ARTIFACTORY_URL:
+        description: 'Optional Artifactory URL fallback'
+        required: false
+
+      # =====================================================
+      # Required Secrets - Azure OIDC
+      # =====================================================
+      AZURE_CLIENT_ID:
+        description: 'Azure AD Application (client) ID for OIDC'
+        required: true
+
+      AZURE_TENANT_ID:
+        description: 'Azure AD Tenant ID'
+        required: true
+
+      AZURE_SUBSCRIPTION_ID:
+        description: 'Azure Subscription ID'
+        required: true
+
+    outputs:
+      deployment-status:
+        description: 'Deployment status (success/failed/dry-run-only)'
+        value: ${{ jobs.deploy.outputs.status }}
+
+      imported-keys-count:
+        description: 'Number of configuration keys imported'
+        value: ${{ jobs.deploy.outputs.keys-count }}
+
+permissions:
+  id-token: write
+  contents: read
+
+# Environment-specific configuration
+env:
+  ENVIRONMENT: dev
+  ENVIRONMENT_UPPER: DEV
+
+jobs:
+  # =====================================================
+  # Stage 1: Prepare
+  # =====================================================
+  prepare:
+    name: Prepare Deployment
+    runs-on:
+      group: sh-dso-snbx-cd-local-001
+      labels: [agent-snbx-001]
+    outputs:
+      lower-app-name: ${{ steps.names.outputs.lower-app-name }}
+      upper-app-name: ${{ steps.names.outputs.upper-app-name }}
+      artifact-name: ${{ steps.artifact.outputs.artifact-name }}
+      artifact-path: ${{ steps.artifact.outputs.artifact-path }}
+      keyvault-name: ${{ steps.config.outputs.keyvault-name }}
+      resource-group: ${{ steps.config.outputs.resource-group }}
+      azure-client-id: ${{ steps.resolve-azure-auth.outputs.azure-client-id }}
+      artifactory-url: ${{ steps.resolve-artifactory.outputs.url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Load workflow configs
+        uses: ibkpe-platform-org/dso-commons-reusable/.github/actions/load-workflows-configs@main
+        with:
+          application: ${{ inputs.application }}
+          component-name: ${{ inputs.component-name }}
+          dso-ghe-app-id: ${{ secrets.DSO_WORKFLOWS_GHAPP_ID }}
+          dso-ghe-private-key: ${{ secrets.DSO_WORKFLOWS_GHAPP_PK }}
+          dso-workflows-configs-repo: ${{ vars.DSO_WORKFLOWS_CONFIGS_REPO }}
+          dso-workflows-configs-repo-owner: ${{ vars.DSO_WORKFLOWS_CONFIGS_REPO_OWNER }}
+
+      - name: Export Artifactory URL from workflow configs
+        run: |
+          if [ ! -z "${IBK_ARTIFACTORY_URL}" ]; then
+            echo "CAPTURED_IBK_ARTIFACTORY_URL=${IBK_ARTIFACTORY_URL}" >> $GITHUB_ENV
+          fi
+
+      - name: Resolve Azure OIDC client id
+        id: resolve-azure-auth
+        run: |
+          AZURE_CLIENT_ID_VALUE="${OIDC_CLIENT_ID_DESTINATION}"
+          if [ -z "${AZURE_CLIENT_ID_VALUE}" ]; then
+            AZURE_CLIENT_ID_VALUE="${{ secrets.AZURE_CLIENT_ID }}"
+          fi
+
+          if [ -z "${AZURE_CLIENT_ID_VALUE}" ]; then
+            echo "::error::Missing Azure client id. Set OIDC_CLIENT_ID_DESTINATION in workflow configs or provide secrets.AZURE_CLIENT_ID"
+            exit 1
+          fi
+
+          echo "azure-client-id=${AZURE_CLIENT_ID_VALUE}" >> $GITHUB_OUTPUT
+          echo "::notice::Using Azure client id resolved from workflow configs fallback"
+
+      - name: Generate application name variants
+        id: names
+        run: |
+          LOWER_APP_NAME=$(echo "${{ inputs.application }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+          UPPER_APP_NAME=$(echo "${{ inputs.application }}" | tr '[:lower:]' '[:upper:]' | tr ' ' '_' | tr '-' '_')
+          echo "lower-app-name=${LOWER_APP_NAME}" >> $GITHUB_OUTPUT
+          echo "upper-app-name=${UPPER_APP_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Calculate artifact details
+        id: artifact
+        run: |
+          ARTIFACT_NAME="${{ inputs.component-name }}-keyvault-${{ inputs.version }}"
+          LOWER_APP=$(echo "${{ inputs.application }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+          PREFIX=$(echo "${{ inputs.application }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+          ARTIFACT_PATH="${PREFIX}-generic-snapshot/${LOWER_APP}/${{ inputs.component-name }}/${{ inputs.version }}/${ARTIFACT_NAME}.zip"
+          
+          echo "artifact-name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+          echo "artifact-path=${ARTIFACT_PATH}" >> $GITHUB_OUTPUT
+          echo "::notice::Artifact path: ${ARTIFACT_PATH}"
+
+      - name: Load environment configuration
+        id: config
+        run: |
+          # Load App Configuration resource name from config.yml for this environment
+          CONFIG_FILE="${{ inputs.config-file-path }}"
+          
+          if [ -f "$CONFIG_FILE" ]; then
+            # Support both keys for compatibility: keyvault-name and resourceName
+            keyvault_NAME=$(grep -A8 "^${{ env.ENVIRONMENT }}:" "$CONFIG_FILE" | grep "keyvault-name:" | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'" || true)
+            if [ -z "$keyvault_NAME" ]; then
+              keyvault_NAME=$(grep -A8 "^${{ env.ENVIRONMENT }}:" "$CONFIG_FILE" | grep "resourceName:" | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'" || true)
+            fi
+            RESOURCE_GROUP=$(grep -A5 "^${{ env.ENVIRONMENT }}:" "$CONFIG_FILE" | grep "resource-group:" | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'" || true)
+            
+            if [ -z "$keyvault_NAME" ]; then
+              echo "::error::No keyvault-name/resourceName found for environment ${{ env.ENVIRONMENT }} in $CONFIG_FILE"
+              exit 1
+            fi
+            
+            if [ -z "$RESOURCE_GROUP" ]; then
+              RESOURCE_GROUP="N/A"
+              echo "::warning::No resource-group found for environment ${{ env.ENVIRONMENT }} in $CONFIG_FILE"
+            fi
+          else
+            echo "::error::config.yml not found at path: $CONFIG_FILE"
+            exit 1
+          fi
+          
+          echo "keyvault-name=${keyvault_NAME}" >> $GITHUB_OUTPUT
+          echo "resource-group=${RESOURCE_GROUP}" >> $GITHUB_OUTPUT
+          echo "::notice::App Configuration: ${keyvault_NAME} in Resource Group: ${RESOURCE_GROUP}"
+
+      - name: Resolve Artifactory URL
+        id: resolve-artifactory
+        run: |
+          URL="${{ inputs.artifactory-url != '' && inputs.artifactory-url || '' }}"
+          if [ -z "$URL" ] && [ ! -z "${CAPTURED_IBK_ARTIFACTORY_URL}" ]; then
+            URL="${CAPTURED_IBK_ARTIFACTORY_URL}"
+          fi
+          if [ -z "$URL" ]; then
+            URL="${{ vars.IBK_ARTIFACTORY_URL }}"
+          fi
+          if [ -z "$URL" ]; then
+            URL="${{ secrets.ARTIFACTORY_URL }}"
+          fi
+          URL="${URL%/}"
+          URL="${URL%/artifactory}"
+          echo "url=${URL}" >> $GITHUB_OUTPUT
+
+  # =====================================================
+  # Stage 2: Download Artifact
+  # =====================================================
+  download-artifact:
+    name: Download Artifact
+    runs-on:
+      group: sh-dso-snbx-cd-local-001
+      labels: [agent-snbx-001]
+    needs: [prepare]
+
+    env:
+      ARTIFACTORY_URL: ${{ needs.prepare.outputs.artifactory-url }}
+
+    steps:
+      - name: Validate Artifactory configuration
+        run: |
+          if [ -z "${{ env.ARTIFACTORY_URL }}" ] || [ -z "${{ secrets.DSO_ARTIFACTORY_TOKEN }}" ]; then
+            echo "::error::Missing Artifactory configuration for download stage"
+            exit 1
+          fi
+
+      - name: Setup JFrog CLI
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ env.ARTIFACTORY_URL }}
+          JF_ACCESS_TOKEN: ${{ secrets.DSO_ARTIFACTORY_TOKEN }}
+
+      - name: Download artifact from Artifactory
+        run: |
+          echo "::group::Downloading artifact"
+          ARTIFACT_PATH="${{ needs.prepare.outputs.artifact-path }}"
+          ARTIFACTORY_TOKEN="${{ secrets.DSO_ARTIFACTORY_TOKEN }}"
+          ARTIFACTORY_URL="${{ needs.prepare.outputs.artifactory-url }}"
+          ARTIFACTORY_URL="${ARTIFACTORY_URL%/}"
+          ARTIFACTORY_URL="${ARTIFACTORY_URL%%/ui*}"
+
+          PRIMARY_URL="${ARTIFACTORY_URL}"
+          FALLBACK_URL="${ARTIFACTORY_URL%/artifactory}/artifactory"
+          RESOLVED_ARTIFACTORY_URL=""
+
+          if jf rt ping --url "${PRIMARY_URL}" --access-token "${ARTIFACTORY_TOKEN}" >/dev/null 2>&1; then
+            RESOLVED_ARTIFACTORY_URL="${PRIMARY_URL}"
+          elif [ "${FALLBACK_URL}" != "${PRIMARY_URL}" ] && jf rt ping --url "${FALLBACK_URL}" --access-token "${ARTIFACTORY_TOKEN}" >/dev/null 2>&1; then
+            RESOLVED_ARTIFACTORY_URL="${FALLBACK_URL}"
+          fi
+
+          if [ -z "${RESOLVED_ARTIFACTORY_URL}" ]; then
+            echo "::error::Unable to resolve a working Artifactory URL. Tried: ${PRIMARY_URL} and ${FALLBACK_URL}"
+            exit 1
+          fi
+
+          echo "::notice::Using Artifactory URL: ${RESOLVED_ARTIFACTORY_URL}"
+          jf rt download "${ARTIFACT_PATH}" ./artifact/ --flat --url "${RESOLVED_ARTIFACTORY_URL}" --access-token "${ARTIFACTORY_TOKEN}"
+          
+          # Verify download
+          if [ ! -f "./artifact/${{ needs.prepare.outputs.artifact-name }}.zip" ]; then
+            echo "::error::Failed to download artifact from ${ARTIFACT_PATH}"
+            exit 1
+          fi
+          
+          # Verify checksum if available
+          jf rt download "${ARTIFACT_PATH}.sha256" ./artifact/ --flat --url "${RESOLVED_ARTIFACTORY_URL}" --access-token "${ARTIFACTORY_TOKEN}" || echo "::warning::Checksum file not found"
+          
+          if [ -f "./artifact/${{ needs.prepare.outputs.artifact-name }}.zip.sha256" ]; then
+            cd artifact
+            sha256sum -c "${{ needs.prepare.outputs.artifact-name }}.zip.sha256"
+            cd ..
+          fi
+          
+          echo "::notice::Artifact downloaded successfully"
+          echo "::endgroup::"
+
+      - name: Extract artifact
+        run: |
+          echo "::group::Extracting artifact"
+          cd artifact
+          unzip "${{ needs.prepare.outputs.artifact-name }}.zip" -d extracted
+          ls -la extracted/
+          echo "::endgroup::"
+
+      - name: Upload extracted artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: keyvault-deployment-${{ env.ENVIRONMENT }}
+          path: artifact/extracted/
+          retention-days: 1
+
+  # =====================================================
+  # Stage 3: Dry Run
+  # =====================================================
+  dry-run:
+    name: Dry Run Preview
+    runs-on:
+      group: sh-dso-snbx-cd-local-001
+      labels: [agent-snbx-001]
+    needs: [prepare, download-artifact]
+    outputs:
+      preview-status: ${{ steps.dry-run.outputs.status }}
+      changes-detected: ${{ steps.dry-run.outputs.changes-detected }}
+
+    steps:
+      - name: Download deployment artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: keyvault-deployment-${{ env.ENVIRONMENT }}
+          path: ./deployment
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          auth-type: IDENTITY
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Azure App Configuration extension
+        run: |
+          az extension add --name keyvault --yes || az extension update --name keyvault
+
+      - name: Preview configuration changes (Dry Run)
+        id: dry-run
+        run: |
+          echo "::group::Dry Run - Preview Changes"
+          
+          keyvault_NAME="${{ needs.prepare.outputs.keyvault-name }}"
+          RESOURCE_GROUP="${{ needs.prepare.outputs.resource-group }}"
+          DATA_FILE="./deployment/data.json"
+          
+          echo "App Configuration: ${keyvault_NAME}"
+          echo "Resource Group: ${RESOURCE_GROUP}"
+          echo "Data File: ${DATA_FILE}"
+          echo ""
+          
+          echo "### Configuration to be imported:"
+          cat "${DATA_FILE}"
+          echo ""
+          
+          # Count keys to be imported
+          KEY_COUNT=$(jq 'keys | length' "${DATA_FILE}")
+          
+          # Build dry-run command with --dry-run flag
+          echo "### Dry Run Import Preview:"
+          DRYRUN_CMD="az keyvault kv import \
+            --name ${keyvault_NAME} \
+            --source file \
+            --path ${DATA_FILE} \
+            --format json \
+            --separator '${{ inputs.separator }}' \
+            --dry-run"
+          
+          # Add optional parameters
+          if [ -n "${{ inputs.label }}" ]; then
+            DRYRUN_CMD="${DRYRUN_CMD} --label '${{ inputs.label }}'"
+          fi
+          
+          if [ -n "${{ inputs.prefix }}" ]; then
+            DRYRUN_CMD="${DRYRUN_CMD} --prefix '${{ inputs.prefix }}'"
+          fi
+          
+          if [ "${{ inputs.depth }}" != "0" ]; then
+            DRYRUN_CMD="${DRYRUN_CMD} --depth ${{ inputs.depth }}"
+          fi
+          
+          if [ "${{ inputs.skip-features }}" == "true" ]; then
+            DRYRUN_CMD="${DRYRUN_CMD} --skip-features"
+          fi
+          
+          echo "Executing dry-run command: ${DRYRUN_CMD}"
+          echo ""
+          
+          # Execute dry-run to preview changes
+          if eval ${DRYRUN_CMD}; then
+            echo ""
+            echo "Keys to be imported: ${KEY_COUNT}"
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "changes-detected=true" >> $GITHUB_OUTPUT
+          else
+            echo "::error::Dry run failed"
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "changes-detected=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          
+          echo "::endgroup::"
+
+      - name: Generate Dry Run Summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # Dry Run Preview - ${{ env.ENVIRONMENT_UPPER }}
+          
+          ## Target Resource
+          | Property | Value |
+          |----------|-------|
+          | **App Configuration** | ${{ needs.prepare.outputs.keyvault-name }} |
+          | **Resource Group** | ${{ needs.prepare.outputs.resource-group }} |
+          | **Environment** | ${{ env.ENVIRONMENT_UPPER }} |
+          
+          ## Import Configuration
+          | Property | Value |
+          |----------|-------|
+          | **Version** | \`${{ inputs.version }}\` |
+          | **Label** | ${{ inputs.label || '(none)' }} |
+          | **Prefix** | ${{ inputs.prefix || '(none)' }} |
+          | **Separator** | \`${{ inputs.separator }}\` |
+          
+          ## Preview Status
+          ✅ Dry run completed successfully. Configuration is ready for import.
+          EOF
+
+  # =====================================================
+  # Stage 4: Deploy
+  # =====================================================
+  deploy:
+    name: Deploy to App Configuration
+    runs-on:
+      group: sh-dso-snbx-cd-local-001
+      labels: [agent-snbx-001]
+    needs: [prepare, download-artifact, dry-run]
+    if: ${{ inputs.FLAG_DRY_RUN_ONLY != true }}
+    outputs:
+      status: ${{ steps.import.outputs.status }}
+      keys-count: ${{ steps.import.outputs.keys-count }}
+
+    steps:
+      - name: Download deployment artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: keyvault-deployment-${{ env.ENVIRONMENT }}
+          path: ./deployment
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ needs.prepare.outputs.azure-client-id }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Azure App Configuration extension
+        run: |
+          az extension add --name keyvault --yes || az extension update --name keyvault
+
+      - name: Import configuration to Azure App Configuration
+        id: import
+        run: |
+          echo "::group::Importing configuration"
+          
+          keyvault_NAME="${{ needs.prepare.outputs.keyvault-name }}"
+          DATA_FILE="./deployment/data.json"
+          
+          # Build import command
+          IMPORT_CMD="az keyvault kv import \
+            --name ${keyvault_NAME} \
+            --source file \
+            --path ${DATA_FILE} \
+            --format json \
+            --separator '${{ inputs.separator }}' \
+            --content-type '${{ inputs.content-type }}' \
+            --yes"
+          
+          # Add optional parameters
+          if [ -n "${{ inputs.label }}" ]; then
+            IMPORT_CMD="${IMPORT_CMD} --label '${{ inputs.label }}'"
+          fi
+          
+          if [ -n "${{ inputs.prefix }}" ]; then
+            IMPORT_CMD="${IMPORT_CMD} --prefix '${{ inputs.prefix }}'"
+          fi
+          
+          if [ "${{ inputs.depth }}" != "0" ]; then
+            IMPORT_CMD="${IMPORT_CMD} --depth ${{ inputs.depth }}"
+          fi
+          
+          if [ "${{ inputs.skip-features }}" == "true" ]; then
+            IMPORT_CMD="${IMPORT_CMD} --skip-features"
+          fi
+          
+          echo "Executing: ${IMPORT_CMD}"
+          
+          # Execute import
+          if eval ${IMPORT_CMD}; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            KEY_COUNT=$(jq 'keys | length' "${DATA_FILE}")
+            echo "keys-count=${KEY_COUNT}" >> $GITHUB_OUTPUT
+            echo "::notice::Successfully imported ${KEY_COUNT} configuration keys"
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "keys-count=0" >> $GITHUB_OUTPUT
+            echo "::error::Failed to import configuration"
+            exit 1
+          fi
+          
+          echo "::endgroup::"
+
+      - name: Verify deployment
+        run: |
+          echo "::group::Verifying deployment"
+          
+          keyvault_NAME="${{ needs.prepare.outputs.keyvault-name }}"
+          
+          # List imported keys
+          echo "Imported configuration keys:"
+          az keyvault kv list \
+            --name "${keyvault_NAME}" \
+            ${{ inputs.label != '' && format('--label "{0}"', inputs.label) || '' }} \
+            --output table
+          
+          echo "::endgroup::"
+
+  # =====================================================
+  # Stage 5: Post Deploy
+  # =====================================================
+  post-deploy:
+    name: Post Deployment
+    runs-on:
+      group: sh-dso-snbx-cd-local-001
+      labels: [agent-snbx-001]
+    needs: [prepare, deploy]
+    if: always()
+
+    steps:
+      - name: Generate Deployment Summary
+        run: |
+          STATUS="${{ needs.deploy.outputs.status || 'skipped' }}"
+          KEYS_COUNT="${{ needs.deploy.outputs.keys-count || '0' }}"
+          
+          if [ "${{ inputs.FLAG_DRY_RUN_ONLY }}" == "true" ]; then
+            STATUS="dry-run-only"
+          fi
+          
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # Deployment Summary - ${{ env.ENVIRONMENT_UPPER }}
+          
+          ## Deployment Information
+          | Property | Value |
+          |----------|-------|
+          | **Application** | ${{ inputs.application }} |
+          | **Component** | ${{ inputs.component-name }} |
+          | **Version** | \`${{ inputs.version }}\` |
+          | **Environment** | ${{ env.ENVIRONMENT_UPPER }} |
+          | **Status** | ${STATUS} |
+          | **Keys Imported** | ${KEYS_COUNT} |
+          
+          ## Target Resource
+          | Property | Value |
+          |----------|-------|
+          | **App Configuration** | ${{ needs.prepare.outputs.keyvault-name }} |
+          | **Resource Group** | ${{ needs.prepare.outputs.resource-group }} |
+          
+          ## Import Settings
+          | Property | Value |
+          |----------|-------|
+          | **Content Type** | \`${{ inputs.content-type }}\` |
+          | **Label** | ${{ inputs.label || '(none)' }} |
+          | **Prefix** | ${{ inputs.prefix || '(none)' }} |
+          | **Separator** | \`${{ inputs.separator }}\` |
+          
+          ---
+          
+          ${{ needs.deploy.outputs.status == 'success' && '✅ Deployment completed successfully!' || needs.deploy.outputs.status == 'failed' && '❌ Deployment failed!' || '⏭️ Deployment was skipped (dry-run only mode)' }}
+          EOF

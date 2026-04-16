@@ -1,0 +1,73 @@
+# =====================================================
+# Caller Workflow: CI - Azure KeyVault Configuration
+# =====================================================
+# This is an example caller workflow for consuming repositories.
+# Copy this file to your repository's .github/workflows/ directory.
+#
+# Prerequisites:
+# - keyvault/data.json file with key-value configuration
+# - keyvault/config.yml file with version and environment configs
+# - Repository secrets configured (see README)
+# =====================================================
+
+name: CI - Key Vault
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'keyvault/data.json'
+      - 'keyvault/config.yml'
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'keyvault/data.json'
+      - 'keyvault/config.yml'
+
+# Prevent concurrent CI runs on the same branch
+concurrency:
+  group: ci-keyvault-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Build and Package
+    # Bind this job to an environment so environment secrets are available.
+    environment: DSO-DEV
+    # Reference format: {org}/{reusable-repo}/.github/workflows/{workflow-file}@{ref}
+    uses: ibkpe-platform-org/dso-keyvault-reusable/.github/workflows/_ci-keyvault.yml@main
+    with:
+      # Required: Application name (used for artifact naming and config lookup)
+      application: 'my-application'
+      
+      # Required: Component name (defaults to repository name)
+      component-name: 'my-component'
+      
+      # Optional: Path to data.json file (default: 'keyvault/data.json')
+      # data-file-path: 'keyvault/data.json'
+      
+      # Optional: Path to config.yml file (default: 'keyvault/config.yml')
+      # config-file-path: 'keyvault/config.yml'
+
+      # Optional: Explicit Artifactory URL override (if org/repo variable is not available in reusable context)
+      # artifactory-url: ${{ vars.IBK_ARTIFACTORY_URL }}
+      
+      # Optional: Enable/disable schema validation (default: true)
+      # FLAG_RUN_SCHEMA_VALIDATION: true
+      
+      # Optional: Enable/disable secret scanning (default: true)
+      # FLAG_RUN_SECRET_SCAN: true
+      
+      # Optional: Enable/disable publishing to Artifactory (default: true)
+      # FLAG_PUBLISH_ARTIFACTS: true
+    secrets:
+      # Required: GitHub App credentials for centralized workflow configs
+      DSO_WORKFLOWS_GHAPP_ID: ${{ secrets.DSO_WORKFLOWS_GHAPP_ID }}
+      DSO_WORKFLOWS_GHAPP_PK: ${{ secrets.DSO_WORKFLOWS_GHAPP_PK }}
+
+      # Required: JFrog token (Artifactory URL comes from variable IBK_ARTIFACTORY_URL)
+      DSO_ARTIFACTORY_TOKEN: ${{ secrets.DSO_ARTIFACTORY_TOKEN }}

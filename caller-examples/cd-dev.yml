@@ -1,0 +1,74 @@
+# =====================================================
+# Caller Workflow: CD DEV - Azure App Configuration
+# =====================================================
+# Deploys configuration to the DEV environment.
+# Trigger manually via workflow_dispatch.
+#
+# Prerequisites:
+# - CI workflow must have run and published artifacts
+# - Azure OIDC credentials configured for DEV environment
+# =====================================================
+
+name: CD - App Configuration (DEV)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Artifact version to deploy (e.g., 1.0.0-42 from CI job summary)'
+        required: true
+        type: string
+
+# Prevent concurrent deployments to DEV
+concurrency:
+  group: cd-appconfig-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy-dev:
+    name: Deploy to DEV
+    # Bind this job to an environment so environment secrets are available.
+    environment: DSO-DEV
+    # Reference format: {org}/{reusable-repo}/.github/workflows/{workflow-file}@{ref}
+    uses: ibkpe-platform-org/dso-appconfig-reusable/.github/workflows/_cd-appconfig-dev.yml@main
+    with:
+      # Required: Application name
+      application: 'my-application'
+      
+      # Required: Version to deploy (from workflow_dispatch input)
+      version: ${{ inputs.version }}
+      
+      # Optional: Component name (defaults to repository name)
+      # component-name: 'my-component'
+
+      # Optional: Azure auth mode ('OIDC' default or 'IDENTITY' for user-assigned managed identity)
+      # azure-auth-type: 'IDENTITY'
+      
+      # Optional: Content type for values (default: 'application/json')
+      # content-type: 'application/json'
+      
+      # Optional: Label for configuration keys
+      # label: 'dev'
+      
+      # Optional: Prefix for all imported keys
+      # prefix: 'MyApp/'
+      
+      # Optional: Separator for flattening nested JSON (default: ':')
+      # separator: ':'
+      
+      # Optional: Perform dry run only without actual import (default: false)
+      # FLAG_DRY_RUN_ONLY: false
+    secrets:
+      # Required: GitHub App credentials for centralized workflow configs
+      DSO_WORKFLOWS_GHAPP_ID: ${{ secrets.DSO_WORKFLOWS_GHAPP_ID }}
+      DSO_WORKFLOWS_GHAPP_PK: ${{ secrets.DSO_WORKFLOWS_GHAPP_PK }}
+
+      # Required: JFrog token (Artifactory URL comes from variable IBK_ARTIFACTORY_URL)
+      DSO_ARTIFACTORY_TOKEN: ${{ secrets.DSO_ARTIFACTORY_TOKEN }}
+      
+      # Required: Azure credentials for DEV environment
+      # - OIDC mode: requires federated credential configured in Entra ID
+      # - IDENTITY mode: user-assigned managed identity (client-id only, no secret needed)
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID_DEV }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}

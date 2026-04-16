@@ -1,0 +1,76 @@
+# =====================================================
+# Caller Workflow: Rollback PRD - Azure App Configuration
+# =====================================================
+# Rolls back production configuration to a previous version.
+# Requires manual approval before rollback.
+# Trigger manually via workflow_dispatch.
+#
+# Prerequisites:
+# - Previous version artifact must exist in Artifactory
+# - Azure OIDC credentials configured for PRD environment
+# - GitHub environment 'prd-rollback' with protection rules configured
+# =====================================================
+
+name: Rollback - App Configuration (PRD)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to rollback to (e.g., 1.0.0-41)'
+        required: true
+        type: string
+      change-order:
+        description: 'Change order/ticket number for rollback (e.g., CHG0012345)'
+        required: false
+        type: string
+      rollback-reason:
+        description: 'Reason for rollback'
+        required: false
+        type: string
+
+# Prevent concurrent PRD rollbacks
+concurrency:
+  group: rollback-appconfig-prd
+  cancel-in-progress: false
+
+jobs:
+  rollback-prd:
+    name: Rollback PRD to ${{ inputs.version }}
+    # Reference format: {org}/{reusable-repo}/.github/workflows/{workflow-file}@{ref}
+    uses: ibkpe-platform-org/dso-appconfig-reusable/.github/workflows/_appconfig-rollback-prd.yml@main
+    with:
+      # Required: Application name
+      application: 'my-application'
+      
+      # Required: Version to rollback to
+      version: ${{ inputs.version }}
+      
+      # Optional: Component name (defaults to repository name)
+      # component-name: 'my-component'
+      
+      # Optional: Content type for values (default: 'application/json')
+      # content-type: 'application/json'
+      
+      # Optional: Label for configuration keys
+      # label: ''
+      
+      # Optional: Prefix for all imported keys
+      # prefix: ''
+      
+      # Optional: Change order for audit trail
+      change-order: ${{ inputs.change-order }}
+      
+      # Optional: Reason for rollback
+      rollback-reason: ${{ inputs.rollback-reason }}
+      
+      # Optional: Perform dry run only without actual rollback (default: false)
+      # FLAG_DRY_RUN_ONLY: false
+    secrets:
+      # Required: JFrog token (Artifactory URL comes from variable IBK_ARTIFACTORY_URL)
+      DSO_ARTIFACTORY_TOKEN: ${{ secrets.DSO_ARTIFACTORY_TOKEN }}
+      
+      # Required: Azure OIDC credentials for PRD environment
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID_PRD }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID_PRD }}

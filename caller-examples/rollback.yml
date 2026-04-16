@@ -1,0 +1,71 @@
+# =====================================================
+# Caller Workflow: Rollback - Azure App Configuration
+# =====================================================
+# Rolls back configuration to a previous version.
+# Use for DEV and UAT environments.
+# Trigger manually via workflow_dispatch.
+#
+# Prerequisites:
+# - Previous version artifact must exist in Artifactory
+# - Azure OIDC credentials configured for target environment
+# =====================================================
+
+name: Rollback - App Configuration
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment to rollback'
+        required: true
+        type: choice
+        options:
+          - dev
+          - uat
+      version:
+        description: 'Version to rollback to (e.g., 1.0.0-41)'
+        required: true
+        type: string
+
+# Prevent concurrent rollbacks
+concurrency:
+  group: rollback-appconfig-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    name: Rollback to ${{ inputs.version }}
+    # Reference format: {org}/{reusable-repo}/.github/workflows/{workflow-file}@{ref}
+    uses: ibkpe-platform-org/dso-appconfig-reusable/.github/workflows/_appconfig-rollback.yml@main
+    with:
+      # Required: Application name
+      application: 'my-application'
+      
+      # Required: Version to rollback to
+      version: ${{ inputs.version }}
+      
+      # Required: Target environment
+      environment: ${{ inputs.environment }}
+      
+      # Optional: Component name (defaults to repository name)
+      # component-name: 'my-component'
+      
+      # Optional: Content type for values (default: 'application/json')
+      # content-type: 'application/json'
+      
+      # Optional: Label for configuration keys
+      # label: ''
+      
+      # Optional: Prefix for all imported keys
+      # prefix: ''
+      
+      # Optional: Perform dry run only without actual rollback (default: false)
+      # FLAG_DRY_RUN_ONLY: false
+    secrets:
+      # Required: JFrog token (Artifactory URL comes from variable IBK_ARTIFACTORY_URL)
+      DSO_ARTIFACTORY_TOKEN: ${{ secrets.DSO_ARTIFACTORY_TOKEN }}
+      
+      # Required: Azure OIDC credentials (use environment-specific secrets)
+      AZURE_CLIENT_ID: ${{ inputs.environment == 'dev' && secrets.AZURE_CLIENT_ID_DEV || secrets.AZURE_CLIENT_ID_UAT }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ inputs.environment == 'dev' && secrets.AZURE_SUBSCRIPTION_ID_DEV || secrets.AZURE_SUBSCRIPTION_ID_UAT }}
