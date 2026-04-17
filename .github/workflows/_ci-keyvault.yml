@@ -467,7 +467,6 @@ jobs:
           echo "Repository path: ${FULL_PATH}"
           
           # Upload artifact and checksum
-          echo 'jf rt upload --build-name="${{ inputs.application }}-keyvault" --build-number="${{ github.run_number }}" "${ARTIFACT_ZIP}" "${FULL_PATH}"'
           jf rt upload --build-name="${{ inputs.application }}-keyvault" --build-number="${{ github.run_number }}" "${ARTIFACT_ZIP}" "${FULL_PATH}"
 
           # Attach metadata properties after upload
