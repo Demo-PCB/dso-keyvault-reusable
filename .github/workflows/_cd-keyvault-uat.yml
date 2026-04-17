@@ -178,7 +178,7 @@ jobs:
   prepare:
     name: Prepare Deployment
     runs-on:
-      group: sh-dso-snbx-cd-local-001
+      #group: sh-dso-snbx-cd-local-001
       labels: [agent-snbx-001]
     outputs:
       lower-app-name: ${{ steps.names.outputs.lower-app-name }}
@@ -296,7 +296,7 @@ jobs:
   download-artifact:
     name: Download Artifact
     runs-on:
-      group: sh-dso-snbx-cd-local-001
+      #group: sh-dso-snbx-cd-local-001
       labels: [agent-snbx-001]
     needs: [prepare]
 
@@ -381,7 +381,7 @@ jobs:
   dry-run:
     name: Dry Run Preview
     runs-on:
-      group: sh-dso-snbx-cd-local-001
+      #group: sh-dso-snbx-cd-local-001
       labels: [agent-snbx-001]
     needs: [prepare, download-artifact]
     outputs:
@@ -489,7 +489,7 @@ jobs:
   deploy:
     name: Deploy to KeyVault
     runs-on:
-      group: sh-dso-snbx-cd-local-001
+      #group: sh-dso-snbx-cd-local-001
       labels: [agent-snbx-001]
     needs: [prepare, download-artifact, dry-run]
     if: ${{ inputs.FLAG_DRY_RUN_ONLY != true }}
@@ -583,7 +583,7 @@ jobs:
   create-git-tag:
     name: Create Git Tag
     runs-on:
-      group: sh-dso-snbx-cd-local-001
+      #group: sh-dso-snbx-cd-local-001
       labels: [agent-snbx-001]
     needs: [prepare, deploy]
     if: ${{ needs.deploy.outputs.status == 'success' && inputs.FLAG_SKIP_GIT_TAG != true }}
