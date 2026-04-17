@@ -171,7 +171,7 @@ jobs:
   prepare:
     name: Prepare Deployment
     runs-on:
-      #group: sh-dso-snbx-cd-local-001
+      group: sh-dso-snbx-cd-local-001
       labels: [agent-snbx-001]
     outputs:
       lower-app-name: ${{ steps.names.outputs.lower-app-name }}
