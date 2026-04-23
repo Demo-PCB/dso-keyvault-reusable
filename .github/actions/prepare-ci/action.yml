@@ -92,7 +92,7 @@ runs:
         fi
         
         FULL_VERSION="${PROJECT_VERSION}-${{ inputs.run-number }}"
-        ARTIFACT_NAME="${{ inputs.component-name }}-appconfig-${FULL_VERSION}"
+        ARTIFACT_NAME="${{ inputs.component-name }}-keyvault-${FULL_VERSION}"
         
         echo "project-version=${PROJECT_VERSION}" >> $GITHUB_OUTPUT
         echo "version=${FULL_VERSION}" >> $GITHUB_OUTPUT

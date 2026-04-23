@@ -5,7 +5,7 @@
 # for the target Azure KeyVault resource.
 #
 # Outputs:
-# - appconfig-name: Azure KeyVault resource name
+# - keyvault-name: Azure KeyVault resource name
 # - resource-group: Azure Resource Group name
 # - artifact-name: Name of the artifact to download
 # - artifact-path: Full Artifactory path to the artifact
@@ -37,9 +37,9 @@ inputs:
     default: 'config.yml'
 
 outputs:
-  appconfig-name:
+  keyvault-name:
     description: 'Azure KeyVault resource name'
-    value: ${{ steps.config.outputs.appconfig-name }}
+    value: ${{ steps.config.outputs.keyvault-name }}
 
   resource-group:
     description: 'Azure Resource Group name'
@@ -77,7 +77,7 @@ runs:
       id: artifact
       shell: bash
       run: |
-        ARTIFACT_NAME="${{ inputs.component-name }}-appconfig-${{ inputs.version }}"
+        ARTIFACT_NAME="${{ inputs.component-name }}-keyvault-${{ inputs.version }}"
         LOWER_APP=$(echo "${{ inputs.application }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
         PREFIX=$(echo "${{ inputs.application }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
         case "${{ inputs.environment }}" in
@@ -100,11 +100,11 @@ runs:
         ENV="${{ inputs.environment }}"
         
         if [ -f "$CONFIG_FILE" ]; then
-          APPCONFIG_NAME=$(grep -A5 "^${ENV}:" "$CONFIG_FILE" | grep "appconfig-name:" | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'" || true)
+          KEYVAULT_NAME=$(grep -A5 "^${ENV}:" "$CONFIG_FILE" | grep "keyvault-name:" | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'" || true)
           RESOURCE_GROUP=$(grep -A5 "^${ENV}:" "$CONFIG_FILE" | grep "resource-group:" | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'" || true)
           
-          if [ -z "$APPCONFIG_NAME" ]; then
-            echo "::error::No appconfig-name found for environment ${ENV} in config.yml"
+          if [ -z "$KEYVAULT_NAME" ]; then
+            echo "::error::No keyvault-name found for environment ${ENV} in config.yml"
             exit 1
           fi
           
@@ -117,6 +117,6 @@ runs:
           exit 1
         fi
         
-        echo "appconfig-name=${APPCONFIG_NAME}" >> $GITHUB_OUTPUT
+        echo "keyvault-name=${KEYVAULT_NAME}" >> $GITHUB_OUTPUT
         echo "resource-group=${RESOURCE_GROUP}" >> $GITHUB_OUTPUT
-        echo "::notice::KeyVault: ${APPCONFIG_NAME} in Resource Group: ${RESOURCE_GROUP}"
+        echo "::notice::KeyVault: ${KEYVAULT_NAME} in Resource Group: ${RESOURCE_GROUP}"

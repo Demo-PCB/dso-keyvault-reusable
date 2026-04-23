@@ -106,7 +106,7 @@ on:
 
 jobs:
   ci:
-    uses: ibkpe-platform-org/dso-keyvault-reusable/.github/workflows/_ci-keyvault.yml@main
+    uses: armedinag/dso-keyvault-reusable/.github/workflows/_ci-keyvault.yml@main
     with:
       application: 'my-application'
     secrets:
@@ -126,7 +126,7 @@ on:
 
 jobs:
   deploy:
-    uses: ibkpe-platform-org/dso-keyvault-reusable/.github/workflows/_cd-keyvault-dev.yml@main
+    uses: armedinag/dso-keyvault-reusable/.github/workflows/_cd-keyvault-dev.yml@main
     with:
       application: 'my-application'
       version: ${{ inputs.version }}

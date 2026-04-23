@@ -29,14 +29,14 @@ on:
 
 # Prevent concurrent rollbacks
 concurrency:
-  group: rollback-appconfig-${{ inputs.environment }}
+  group: rollback-keyvault-${{ inputs.environment }}
   cancel-in-progress: false
 
 jobs:
   rollback:
     name: Rollback to ${{ inputs.version }}
     # Reference format: {org}/{reusable-repo}/.github/workflows/{workflow-file}@{ref}
-    uses: ibkpe-platform-org/dso-appconfig-reusable/.github/workflows/_appconfig-rollback.yml@main
+    uses: armedinag/dso-keyvault-reusable/.github/workflows/_keyvault-rollback.yml@main
     with:
       # Required: Application name
       application: 'my-application'

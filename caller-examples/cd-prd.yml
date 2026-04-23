@@ -32,14 +32,14 @@ on:
 
 # Prevent concurrent deployments to PRD
 concurrency:
-  group: cd-appconfig-prd
+  group: cd-keyvault-prd
   cancel-in-progress: false
 
 jobs:
   deploy-prd:
     name: Deploy to PRD
     # Reference format: {org}/{reusable-repo}/.github/workflows/{workflow-file}@{ref}
-    uses: ibkpe-platform-org/dso-appconfig-reusable/.github/workflows/_cd-appconfig-prd.yml@main
+    uses: armedinag/dso-keyvault-reusable/.github/workflows/_cd-keyvault-prd.yml@main
     with:
       # Required: Application name
       application: 'my-application'

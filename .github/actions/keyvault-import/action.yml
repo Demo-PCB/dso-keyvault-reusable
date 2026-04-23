@@ -12,7 +12,7 @@ name: 'KeyVault Import'
 description: 'Import configuration into Azure KeyVault'
 
 inputs:
-  appconfig-name:
+  keyvault-name:
     description: 'Azure KeyVault resource name'
     required: true
 
@@ -65,7 +65,7 @@ runs:
     - name: Install Azure KeyVault extension
       shell: bash
       run: |
-        az extension add --name appconfig --yes || az extension update --name appconfig
+        az extension add --name keyvault --yes || az extension update --name keyvault
 
     - name: Import configuration to Azure KeyVault
       id: import
@@ -73,7 +73,7 @@ runs:
       run: |
         echo "::group::Importing configuration"
         
-        APPCONFIG_NAME="${{ inputs.appconfig-name }}"
+        KEYVAULT_NAME="${{ inputs.keyvault-name }}"
         DATA_FILE="${{ inputs.data-file-path }}"
         
         if [ ! -f "${DATA_FILE}" ]; then
@@ -84,8 +84,8 @@ runs:
         fi
         
         # Build import command
-        IMPORT_CMD="az appconfig kv import \
-          --name ${APPCONFIG_NAME} \
+        IMPORT_CMD="az keyvault kv import \
+          --name ${KEYVAULT_NAME} \
           --source file \
           --path ${DATA_FILE} \
           --format json \
@@ -132,11 +132,11 @@ runs:
       run: |
         echo "::group::Verifying import"
         
-        APPCONFIG_NAME="${{ inputs.appconfig-name }}"
+        KEYVAULT_NAME="${{ inputs.keyvault-name }}"
         
         echo "Imported configuration keys:"
-        az appconfig kv list \
-          --name "${APPCONFIG_NAME}" \
+        az keyvault kv list \
+          --name "${KEYVAULT_NAME}" \
           ${{ inputs.label != '' && format('--label "{0}"', inputs.label) || '' }} \
           --output table
         

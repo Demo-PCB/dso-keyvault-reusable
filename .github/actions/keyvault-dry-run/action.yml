@@ -13,7 +13,7 @@ name: 'KeyVault Dry Run'
 description: 'Preview changes before importing to Azure KeyVault'
 
 inputs:
-  appconfig-name:
+  keyvault-name:
     description: 'Azure KeyVault resource name'
     required: true
 
@@ -65,7 +65,7 @@ runs:
     - name: Install Azure KeyVault extension
       shell: bash
       run: |
-        az extension add --name appconfig --yes || az extension update --name appconfig
+        az extension add --name kv --yes || az extension update --name kv
 
     - name: Preview configuration changes (Dry Run)
       id: dry-run
@@ -73,11 +73,11 @@ runs:
       run: |
         echo "::group::Dry Run - Preview Changes"
         
-        APPCONFIG_NAME="${{ inputs.appconfig-name }}"
+        KEYVAULT_NAME="${{ inputs.keyvault-name }}"
         RESOURCE_GROUP="${{ inputs.resource-group }}"
         DATA_FILE="${{ inputs.data-file-path }}"
         
-        echo "KeyVault: ${APPCONFIG_NAME}"
+        echo "KeyVault: ${KEYVAULT_NAME}"
         echo "Resource Group: ${RESOURCE_GROUP}"
         echo "Data File: ${DATA_FILE}"
         echo ""
@@ -99,8 +99,8 @@ runs:
         
         # Build dry-run command with --dry-run flag
         echo "### Dry Run Import Preview:"
-        DRYRUN_CMD="az appconfig kv import \
-          --name ${APPCONFIG_NAME} \
+        DRYRUN_CMD="az keyvault kv import \
+          --name ${KEYVAULT_NAME} \
           --source file \
           --path ${DATA_FILE} \
           --format json \
@@ -150,7 +150,7 @@ runs:
         
         | Property | Value |
         |----------|-------|
-        | **KeyVault** | ${{ inputs.appconfig-name }} |
+        | **KeyVault** | ${{ inputs.keyvault-name }} |
         | **Resource Group** | ${{ inputs.resource-group }} |
         | **Environment** | ${ENV_DISPLAY} |
         | **Keys to Import** | ${{ steps.dry-run.outputs.key-count }} |

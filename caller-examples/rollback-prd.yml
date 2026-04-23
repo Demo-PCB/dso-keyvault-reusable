@@ -31,14 +31,14 @@ on:
 
 # Prevent concurrent PRD rollbacks
 concurrency:
-  group: rollback-appconfig-prd
+  group: rollback-keyvault-prd
   cancel-in-progress: false
 
 jobs:
   rollback-prd:
     name: Rollback PRD to ${{ inputs.version }}
     # Reference format: {org}/{reusable-repo}/.github/workflows/{workflow-file}@{ref}
-    uses: ibkpe-platform-org/dso-appconfig-reusable/.github/workflows/_appconfig-rollback-prd.yml@main
+    uses: armedinag/dso-keyvault-reusable/.github/workflows/_keyvault-rollback-prd.yml@main
     with:
       # Required: Application name
       application: 'my-application'

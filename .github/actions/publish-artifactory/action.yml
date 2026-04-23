@@ -87,21 +87,21 @@ runs:
         
         # Upload artifact
         jf rt upload "${ARTIFACT_FILE}" "${FULL_PATH}" \
-          --build-name="${{ inputs.application }}-appconfig" \
+          --build-name="${{ inputs.application }}-keyvault" \
           --build-number="${{ inputs.build-number }}" \
           --props="version=${VERSION};application=${{ inputs.application }};component=${{ inputs.component-name }};sha=${{ inputs.sha }}"
         
         # Upload checksum if exists
         if [ -f "${ARTIFACT_FILE}.sha256" ]; then
           jf rt upload "${ARTIFACT_FILE}.sha256" "${REPO_PATH}/${ARTIFACT_NAME}.zip.sha256" \
-            --build-name="${{ inputs.application }}-appconfig" \
+            --build-name="${{ inputs.application }}-keyvault" \
             --build-number="${{ inputs.build-number }}"
         fi
         
         # Collect and publish build info
-        jf rt build-collect-env "${{ inputs.application }}-appconfig" "${{ inputs.build-number }}"
-        jf rt build-add-git "${{ inputs.application }}-appconfig" "${{ inputs.build-number }}" || true
-        jf rt build-publish "${{ inputs.application }}-appconfig" "${{ inputs.build-number }}"
+        jf rt build-collect-env "${{ inputs.application }}-keyvault" "${{ inputs.build-number }}"
+        jf rt build-add-git "${{ inputs.application }}-keyvault" "${{ inputs.build-number }}" || true
+        jf rt build-publish "${{ inputs.application }}-keyvault" "${{ inputs.build-number }}"
         
         echo "artifact-path=${FULL_PATH}" >> $GITHUB_OUTPUT
         echo "::notice::Artifact published to: ${FULL_PATH}"

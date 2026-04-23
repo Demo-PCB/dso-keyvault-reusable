@@ -22,14 +22,14 @@ on:
 
 # Prevent concurrent deployments to UAT
 concurrency:
-  group: cd-appconfig-uat
+  group: cd-keyvault-uat
   cancel-in-progress: false
 
 jobs:
   deploy-uat:
     name: Deploy to UAT
     # Reference format: {org}/{reusable-repo}/.github/workflows/{workflow-file}@{ref}
-    uses: ibkpe-platform-org/dso-appconfig-reusable/.github/workflows/_cd-appconfig-uat.yml@main
+    uses: armedinag/dso-keyvault-reusable/.github/workflows/_cd-keyvault-uat.yml@main
     with:
       # Required: Application name
       application: 'my-application'

@@ -21,7 +21,7 @@ on:
 
 # Prevent concurrent deployments to DEV
 concurrency:
-  group: cd-appconfig-dev
+  group: cd-keyvault-dev
   cancel-in-progress: false
 
 jobs:
@@ -30,7 +30,7 @@ jobs:
     # Bind this job to an environment so environment secrets are available.
     environment: DSO-DEV
     # Reference format: {org}/{reusable-repo}/.github/workflows/{workflow-file}@{ref}
-    uses: ibkpe-platform-org/dso-appconfig-reusable/.github/workflows/_cd-appconfig-dev.yml@main
+    uses: armedinag/dso-keyvault-reusable/.github/workflows/_cd-keyvault-dev.yml@main
     with:
       # Required: Application name
       application: 'my-application'
