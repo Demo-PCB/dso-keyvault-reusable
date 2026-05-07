@@ -38,7 +38,7 @@ jobs:
   rollback-prd:
     name: Rollback PRD to ${{ inputs.version }}
     # Reference format: {org}/{reusable-repo}/.github/workflows/{workflow-file}@{ref}
-    uses: armedinag/dso-keyvault-reusable/.github/workflows/_keyvault-rollback-prd.yml@main
+    uses: Demo-PCB/dso-keyvault-reusable/.github/workflows/_keyvault-rollback-prd.yml@main
     with:
       # Required: Application name
       application: 'my-application'

@@ -214,7 +214,7 @@ jobs:
           fetch-depth: 0
 
       - name: Load workflow configs
-        uses: armedinag/dso-commons-reusable/.github/actions/load-workflows-configs@main
+        uses: Demo-PCB/dso-commons-reusable/.github/actions/load-workflows-configs@main
         with:
           application: ${{ inputs.application }}
           component-name: ${{ inputs.component-name }}

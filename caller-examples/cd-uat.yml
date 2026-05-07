@@ -29,7 +29,7 @@ jobs:
   deploy-uat:
     name: Deploy to UAT
     # Reference format: {org}/{reusable-repo}/.github/workflows/{workflow-file}@{ref}
-    uses: armedinag/dso-keyvault-reusable/.github/workflows/_cd-keyvault-uat.yml@main
+    uses: Demo-PCB/dso-keyvault-reusable/.github/workflows/_cd-keyvault-uat.yml@main
     with:
       # Required: Application name
       application: 'my-application'

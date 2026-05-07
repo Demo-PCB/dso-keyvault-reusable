@@ -39,7 +39,7 @@ jobs:
     # Bind this job to an environment so environment secrets are available.
     environment: DSO-DEV
     # Reference format: {org}/{reusable-repo}/.github/workflows/{workflow-file}@{ref}
-    uses: armedinag/dso-keyvault-reusable/.github/workflows/_ci-keyvault.yml@main
+    uses: Demo-PCB/dso-keyvault-reusable/.github/workflows/_ci-keyvault.yml@main
     with:
       # Required: Application name (used for artifact naming and config lookup)
       application: 'my-application'

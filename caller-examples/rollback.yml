@@ -36,7 +36,7 @@ jobs:
   rollback:
     name: Rollback to ${{ inputs.version }}
     # Reference format: {org}/{reusable-repo}/.github/workflows/{workflow-file}@{ref}
-    uses: armedinag/dso-keyvault-reusable/.github/workflows/_keyvault-rollback.yml@main
+    uses: Demo-PCB/dso-keyvault-reusable/.github/workflows/_keyvault-rollback.yml@main
     with:
       # Required: Application name
       application: 'my-application'
