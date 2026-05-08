@@ -1,143 +1,85 @@
-# =====================================================
-# Composite Action: KeyVault Import
-# =====================================================
-# Imports configuration data into Azure KeyVault.
-#
-# Prerequisites:
-# - Azure CLI logged in with appropriate permissions
-# - KeyVault extension installed
-# =====================================================
-
-name: 'KeyVault Import'
-description: 'Import configuration into Azure KeyVault'
+name: Key Vault Import
+description: Create missing Azure Key Vault secrets with DEMO and never overwrite real values
 
 inputs:
   keyvault-name:
-    description: 'Azure KeyVault resource name'
+    description: Azure Key Vault name
     required: true
-
   data-file-path:
-    description: 'Path to the data.json file to import'
+    description: Path to data.json
     required: true
-
-  content-type:
-    description: 'Content type for KeyVault values'
+  initial-secret-value:
+    description: Initial value used for newly created secrets
     required: false
-    default: 'application/json'
-
-  label:
-    description: 'Label to apply to imported configuration keys'
-    required: false
-    default: ''
-
-  prefix:
-    description: 'Prefix to add to all imported keys'
-    required: false
-    default: ''
-
-  separator:
-    description: 'Separator for flattening nested JSON keys'
-    required: false
-    default: ':'
-
-  depth:
-    description: 'Depth for flattening nested JSON (0 = unlimited)'
-    required: false
-    default: '0'
-
-  skip-features:
-    description: 'Skip importing feature flags'
-    required: false
-    default: 'false'
+    default: DEMO
 
 outputs:
   status:
-    description: 'Import status (success/failed)'
+    description: Import status
     value: ${{ steps.import.outputs.status }}
-
+  created-count:
+    description: Number of secrets created
+    value: ${{ steps.import.outputs.created-count }}
+  skipped-count:
+    description: Number of secrets skipped because they already had real values
+    value: ${{ steps.import.outputs.skipped-count }}
+  demo-count:
+    description: Number of existing secrets with initial value
+    value: ${{ steps.import.outputs.demo-count }}
   keys-count:
-    description: 'Number of configuration keys imported'
+    description: Total number of processed secret names
     value: ${{ steps.import.outputs.keys-count }}
 
 runs:
-  using: 'composite'
+  using: composite
   steps:
-    - name: Install Azure KeyVault extension
-      shell: bash
-      run: |
-        az extension add --name keyvault --yes || az extension update --name keyvault
-
-    - name: Import configuration to Azure KeyVault
+    - name: Create missing secrets safely
       id: import
       shell: bash
       run: |
-        echo "::group::Importing configuration"
-        
-        KEYVAULT_NAME="${{ inputs.keyvault-name }}"
-        DATA_FILE="${{ inputs.data-file-path }}"
-        
-        if [ ! -f "${DATA_FILE}" ]; then
-          echo "::error::Data file not found: ${DATA_FILE}"
-          echo "status=failed" >> $GITHUB_OUTPUT
-          echo "keys-count=0" >> $GITHUB_OUTPUT
-          exit 1
-        fi
-        
-        # Build import command
-        IMPORT_CMD="az keyvault kv import \
-          --name ${KEYVAULT_NAME} \
-          --source file \
-          --path ${DATA_FILE} \
-          --format json \
-          --separator '${{ inputs.separator }}' \
-          --content-type '${{ inputs.content-type }}' \
-          --yes"
-        
-        # Add optional parameters
-        if [ -n "${{ inputs.label }}" ]; then
-          IMPORT_CMD="${IMPORT_CMD} --label '${{ inputs.label }}'"
-        fi
-        
-        if [ -n "${{ inputs.prefix }}" ]; then
-          IMPORT_CMD="${IMPORT_CMD} --prefix '${{ inputs.prefix }}'"
-        fi
-        
-        if [ "${{ inputs.depth }}" != "0" ]; then
-          IMPORT_CMD="${IMPORT_CMD} --depth ${{ inputs.depth }}"
-        fi
-        
-        if [ "${{ inputs.skip-features }}" == "true" ]; then
-          IMPORT_CMD="${IMPORT_CMD} --skip-features"
-        fi
-        
-        echo "Executing: ${IMPORT_CMD}"
-        
-        # Execute import
-        if eval ${IMPORT_CMD}; then
-          echo "status=success" >> $GITHUB_OUTPUT
-          KEY_COUNT=$(jq 'keys | length' "${DATA_FILE}")
-          echo "keys-count=${KEY_COUNT}" >> $GITHUB_OUTPUT
-          echo "::notice::Successfully imported ${KEY_COUNT} configuration keys"
-        else
-          echo "status=failed" >> $GITHUB_OUTPUT
-          echo "keys-count=0" >> $GITHUB_OUTPUT
-          echo "::error::Failed to import configuration"
-          exit 1
-        fi
-        
-        echo "::endgroup::"
+        set -euo pipefail
 
-    - name: Verify import
-      shell: bash
-      run: |
-        echo "::group::Verifying import"
-        
-        KEYVAULT_NAME="${{ inputs.keyvault-name }}"
-        
-        echo "Imported configuration keys:"
-        az keyvault kv list \
-          --name "${KEYVAULT_NAME}" \
-          ${{ inputs.label != '' && format('--label "{0}"', inputs.label) || '' }} \
-          --output table
-        
-        echo "::endgroup::"
+        KEYVAULT_NAME='${{ inputs.keyvault-name }}'
+        DATA_FILE='${{ inputs.data-file-path }}'
+        INITIAL_VALUE='${{ inputs.initial-secret-value }}'
+
+        CREATED_COUNT=0
+        SKIPPED_COUNT=0
+        DEMO_COUNT=0
+        TOTAL_COUNT=0
+
+        echo "## Key Vault import result" >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "| Secret | Result | Details |" >> "$GITHUB_STEP_SUMMARY"
+        echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+
+        while IFS= read -r SECRET_NAME; do
+          TOTAL_COUNT=$((TOTAL_COUNT + 1))
+
+          if CURRENT_VALUE=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name "$SECRET_NAME" --query value -o tsv 2>/dev/null); then
+            if [ "$CURRENT_VALUE" = "$INITIAL_VALUE" ]; then
+              echo "Secret already exists with initial value. No update: $SECRET_NAME"
+              echo "| $SECRET_NAME | NO_CHANGE | Existing value is $INITIAL_VALUE |" >> "$GITHUB_STEP_SUMMARY"
+              DEMO_COUNT=$((DEMO_COUNT + 1))
+            else
+              echo "Secret exists with protected value. Skipping: $SECRET_NAME"
+              echo "| $SECRET_NAME | SKIPPED | Existing value is different from $INITIAL_VALUE |" >> "$GITHUB_STEP_SUMMARY"
+              SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+            fi
+          else
+            echo "Creating missing secret with initial value: $SECRET_NAME"
+            az keyvault secret set \
+              --vault-name "$KEYVAULT_NAME" \
+              --name "$SECRET_NAME" \
+              --value "$INITIAL_VALUE" \
+              --output none
+            echo "| $SECRET_NAME | CREATED | Initial value assigned |" >> "$GITHUB_STEP_SUMMARY"
+            CREATED_COUNT=$((CREATED_COUNT + 1))
+          fi
+        done < <(jq -r 'keys[]' "$DATA_FILE")
+
+        echo "status=success" >> "$GITHUB_OUTPUT"
+        echo "created-count=$CREATED_COUNT" >> "$GITHUB_OUTPUT"
+        echo "skipped-count=$SKIPPED_COUNT" >> "$GITHUB_OUTPUT"
+        echo "demo-count=$DEMO_COUNT" >> "$GITHUB_OUTPUT"
+        echo "keys-count=$TOTAL_COUNT" >> "$GITHUB_OUTPUT"

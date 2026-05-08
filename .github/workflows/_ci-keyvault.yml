@@ -1,537 +1,207 @@
-# =====================================================
-# CI Reusable Workflow - Azure KeyVault
-# =====================================================
-# This workflow validates, packages, and publishes KeyVault changes
-# to Artifactory for subsequent deployment to Azure KeyVault resources.
-#
-# Workflow stages:
-# 1. prepare - Checkout, validate inputs, calculate version
-# 2. validate - Validate data.json and config.yml structure
-# 3. package - Create versioned zip artifact
-# 4. publish-artifact - Upload to Artifactory with signing
-# 5. publish-summary - Generate job summary with version output
-# =====================================================
-
-name: CI - KeyVault Configuration
+name: Reusable - Update Azure Key Vault Secrets
 
 on:
   workflow_call:
     inputs:
-      # =====================================================
-      # Required Inputs
-      # =====================================================
-      application:
-        description: 'Application name (used for artifact naming and config lookup)'
-        required: true
-        type: string
-
-      component-name:
-        description: 'Component name (default: repository name)'
+      environment:
+        description: 'Target environment from keyvault/config.yml. Example: dev, uat, prd'
         required: false
         type: string
-        default: ${{ github.event.repository.name }}
-
-      # =====================================================
-      # Optional Inputs - Paths
-      # =====================================================
+        default: 'dev'
       data-file-path:
-        description: 'Path to the data.json file containing key-value pairs to import'
+        description: 'Path to data.json in the caller repository'
         required: false
         type: string
         default: 'keyvault/data.json'
-
       config-file-path:
-        description: 'Path to the config.yml file containing version and resource names per environment'
+        description: 'Path to config.yml in the caller repository'
         required: false
         type: string
         default: 'keyvault/config.yml'
-      
-      artifactory-url:
-        description: 'Optional Artifactory URL override. If empty, uses vars.IBK_ARTIFACTORY_URL'
+      initial-secret-value:
+        description: 'Initial value for newly created secrets'
         required: false
         type: string
-        default: ''
-
-      # =====================================================
-      # Optional Inputs - Feature Flags
-      # =====================================================
-      FLAG_RUN_SCHEMA_VALIDATION:
-        description: 'Enable JSON/YAML schema validation'
+        default: 'DEMO'
+      dry-run:
+        description: 'Only preview changes. Does not create secrets.'
         required: false
         type: boolean
-        default: true
-
-      FLAG_RUN_SECRET_SCAN:
-        description: 'Enable secret scanning with Gitleaks'
-        required: false
-        type: boolean
-        default: true
-
-      FLAG_PUBLISH_ARTIFACTS:
-        description: 'Enable publishing artifacts to Artifactory'
-        required: false
-        type: boolean
-        default: true
-
+        default: false
     secrets:
-      # =====================================================
-      # Required Secrets
-      # =====================================================
-      DSO_WORKFLOWS_GHAPP_ID:
-        description: 'GitHub App ID used to read centralized workflow configs'
-        required: false
-
-      DSO_WORKFLOWS_GHAPP_PK:
-        description: 'GitHub App private key used to read centralized workflow configs'
-        required: false
-
-      DSO_ARTIFACTORY_TOKEN:
-        description: 'Artifactory token for authentication'
-        required: false
-
-      # =====================================================
-      # Optional Secrets - Fallback for Artifactory URL
-      # =====================================================
-      ARTIFACTORY_URL:
-        description: 'Optional: Artifactory URL (fallback if vars.IBK_ARTIFACTORY_URL not available or input artifactory-url not provided)'
-        required: false
-
+      AZURE_CLIENT_ID:
+        description: 'Azure App Registration client id for OIDC'
+        required: true
+      AZURE_TENANT_ID:
+        description: 'Azure tenant id'
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        description: 'Azure subscription id'
+        required: true
     outputs:
-      version:
-        description: 'Computed version in format {project-version}-{run-number}'
-        value: ${{ jobs.publish-summary.outputs.version }}
+      status:
+        description: 'Execution status'
+        value: ${{ jobs.update-keyvault.outputs.status }}
+      keyvault-name:
+        description: 'Target Key Vault name'
+        value: ${{ jobs.update-keyvault.outputs.keyvault-name }}
+      created-count:
+        description: 'Number of secrets created'
+        value: ${{ jobs.update-keyvault.outputs.created-count }}
+      skipped-count:
+        description: 'Number of secrets skipped because they already have real values'
+        value: ${{ jobs.update-keyvault.outputs.skipped-count }}
+      demo-count:
+        description: 'Number of existing secrets that still have DEMO value'
+        value: ${{ jobs.update-keyvault.outputs.demo-count }}
 
-      artifact-name:
-        description: 'Name of the published artifact'
-        value: ${{ jobs.publish-summary.outputs.artifact-name }}
-
-      artifact-path:
-        description: 'Full Artifactory path to the artifact'
-        value: ${{ jobs.publish-summary.outputs.artifact-path }}
-
-env:
-  ARTIFACT_RETENTION_DAYS: 90
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
-  # =====================================================
-  # Stage 1: Prepare
-  # =====================================================
-  prepare:
-    name: Prepare
+  update-keyvault:
+    name: Update Azure Key Vault
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      project-version: ${{ steps.version.outputs.project-version }}
-      artifact-name: ${{ steps.version.outputs.artifact-name }}
-      lower-app-name: ${{ steps.names.outputs.lower-app-name }}
-      upper-app-name: ${{ steps.names.outputs.upper-app-name }}
-      publish-artifacts: ${{ steps.publish-check.outputs.publish }}
-      artifactory-url: ${{ steps.resolve-artifactory.outputs.url }}
+      status: ${{ steps.import.outputs.status }}
+      keyvault-name: ${{ steps.config.outputs.keyvault-name }}
+      created-count: ${{ steps.import.outputs.created-count }}
+      skipped-count: ${{ steps.import.outputs.skipped-count }}
+      demo-count: ${{ steps.import.outputs.demo-count }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # - name: Load workflow configs
-      #   uses: Demo-PCB/dso-commons-reusable/.github/actions/load-workflows-configs@main
-      #   with:
-      #     application: ${{ inputs.application }}
-      #     component-name: ${{ inputs.component-name }}
-      #     dso-ghe-app-id: ${{ secrets.DSO_WORKFLOWS_GHAPP_ID }}
-      #     dso-ghe-private-key: ${{ secrets.DSO_WORKFLOWS_GHAPP_PK }}
-      #     dso-workflows-configs-repo: ${{ vars.DSO_WORKFLOWS_CONFIGS_REPO }}
-      #     dso-workflows-configs-repo-owner: ${{ vars.DSO_WORKFLOWS_CONFIGS_REPO_OWNER }}
-
-      - name: Export Artifactory URL from workflow configs
-        run: |
-          # Capture IBK_ARTIFACTORY_URL if it was set by load-workflows-configs
-          if [ ! -z "${IBK_ARTIFACTORY_URL}" ]; then
-            echo "CAPTURED_IBK_ARTIFACTORY_URL=${IBK_ARTIFACTORY_URL}" >> $GITHUB_ENV
-            echo "::notice::Captured IBK_ARTIFACTORY_URL from load-workflows-configs: ${IBK_ARTIFACTORY_URL}"
-          else
-            echo "::warning::IBK_ARTIFACTORY_URL was not set by load-workflows-configs"
-          fi
-
-      - name: Generate application name variants
-        id: names
-        run: |
-          LOWER_APP_NAME=$(echo "${{ inputs.application }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
-          UPPER_APP_NAME=$(echo "${{ inputs.application }}" | tr '[:lower:]' '[:upper:]' | tr ' ' '_' | tr '-' '_')
-          echo "lower-app-name=${LOWER_APP_NAME}" >> $GITHUB_OUTPUT
-          echo "upper-app-name=${UPPER_APP_NAME}" >> $GITHUB_OUTPUT
-          echo "::notice::Application name variants - Lower: ${LOWER_APP_NAME}, Upper: ${UPPER_APP_NAME}"
-
-      - name: Extract version from config.yml
-        id: version
-        run: |
-          # Extract version from config.yml
-          if [ -f "${{ inputs.config-file-path }}" ]; then
-            PROJECT_VERSION=$(grep -E '^version:' "${{ inputs.config-file-path }}" | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'")
-            if [ -z "$PROJECT_VERSION" ]; then
-              echo "::warning::No version found in config.yml, using default 1.0.0"
-              PROJECT_VERSION="1.0.0"
-            fi
-          else
-            echo "::warning::config.yml not found at ${{ inputs.config-file-path }}, using default version 1.0.0"
-            PROJECT_VERSION="1.0.0"
-          fi
-          
-          # Compute full version with run number
-          FULL_VERSION="${PROJECT_VERSION}-${{ github.run_number }}"
-          ARTIFACT_NAME="${{ inputs.component-name }}-keyvault-${FULL_VERSION}"
-          
-          echo "project-version=${PROJECT_VERSION}" >> $GITHUB_OUTPUT
-          echo "version=${FULL_VERSION}" >> $GITHUB_OUTPUT
-          echo "artifact-name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
-          
-          echo "::notice::Version computed - Project: ${PROJECT_VERSION}, Full: ${FULL_VERSION}"
-
-      - name: Determine if artifacts should be published
-        id: publish-check
-        run: |
-          # Publish artifacts on main/develop branches, skip on PRs
-          if [[ "${{ github.ref }}" == "refs/heads/main" ]] || [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
-            echo "publish=true" >> $GITHUB_OUTPUT
-            echo "::notice::Artifacts will be published (branch: ${{ github.ref }})"
-          else
-            echo "publish=false" >> $GITHUB_OUTPUT
-            echo "::notice::Artifacts will NOT be published (branch: ${{ github.ref }})"
-          fi
-
-      - name: Resolve Artifactory URL
-        id: resolve-artifactory
-        run: |
-          # Resolve URL from: input -> captured env (from load-workflows-configs) -> variable -> secret
-          URL="${{ inputs.artifactory-url != '' && inputs.artifactory-url || '' }}"
-          
-          if [ -z "$URL" ] && [ ! -z "${CAPTURED_IBK_ARTIFACTORY_URL}" ]; then
-            URL="${CAPTURED_IBK_ARTIFACTORY_URL}"
-          fi
-          
-          if [ -z "$URL" ]; then
-            URL="${{ vars.IBK_ARTIFACTORY_URL }}"
-          fi
-          
-          if [ -z "$URL" ]; then
-            URL="${{ secrets.ARTIFACTORY_URL }}"
-          fi
-
-          # JFrog CLI expects the platform base URL (without trailing /artifactory).
-          URL="${URL%/}"
-          URL="${URL%/artifactory}"
-          
-          echo "url=${URL}" >> $GITHUB_OUTPUT
-          if [ -z "$URL" ]; then
-            echo "::warning::Artifactory URL not resolved from input/env/vars/secret"
-          else
-            echo "::notice::Artifactory URL resolved successfully"
-          fi
-
-  # =====================================================
-  # Stage 2: Validate
-  # =====================================================
-  validate:
-    name: Validate Configuration Files
-    runs-on: ubuntu-latest
-    needs: [prepare]
-
-    steps:
-      - name: Checkout repository
+      - name: Checkout caller repository
         uses: actions/checkout@v4
 
-      - name: Validate data.json exists and is valid JSON
-        run: |
-          echo "::group::Validating data.json"
-          
-          if [ ! -f "${{ inputs.data-file-path }}" ]; then
-            echo "::error::data.json not found at path: ${{ inputs.data-file-path }}"
-            exit 1
-          fi
-          
-          # Validate JSON syntax
-          if ! jq empty "${{ inputs.data-file-path }}" 2>/dev/null; then
-            echo "::error::Invalid JSON syntax in ${{ inputs.data-file-path }}"
-            exit 1
-          fi
-          
-          # Validate structure (must be an object with string keys)
-          if ! jq -e 'type == "object"' "${{ inputs.data-file-path }}" > /dev/null; then
-            echo "::error::data.json must be a JSON object with key-value pairs"
-            exit 1
-          fi
-          
-          KEY_COUNT=$(jq 'keys | length' "${{ inputs.data-file-path }}")
-          echo "::notice::data.json is valid with ${KEY_COUNT} configuration keys"
-          echo "::endgroup::"
-
-      - name: Validate config.yml exists and has required fields
-        run: |
-          echo "::group::Validating config.yml"
-          
-          if [ ! -f "${{ inputs.config-file-path }}" ]; then
-            echo "::error::config.yml not found at path: ${{ inputs.config-file-path }}"
-            exit 1
-          fi
-          
-          # Validate YAML syntax
-          if ! python3 -c "import yaml; yaml.safe_load(open('${{ inputs.config-file-path }}'))" 2>/dev/null; then
-            echo "::error::Invalid YAML syntax in ${{ inputs.config-file-path }}"
-            exit 1
-          fi
-          
-          # Validate required fields
-          VERSION=$(grep -E '^version:' "${{ inputs.config-file-path }}" || true)
-          if [ -z "$VERSION" ]; then
-            echo "::error::config.yml must contain a 'version' field"
-            exit 1
-          fi
-          
-          # Check for environment configurations
-          ENVS=$(grep -E '^(dev|uat|stg|prd):' "${{ inputs.config-file-path }}" || true)
-          if [ -z "$ENVS" ]; then
-            echo "::warning::No environment configurations found in config.yml"
-          fi
-          
-          echo "::notice::config.yml is valid"
-          echo "::endgroup::"
-
-      - name: Display configuration summary
-        run: |
-          echo "## Configuration Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### data.json" >> $GITHUB_STEP_SUMMARY
-          echo '```json' >> $GITHUB_STEP_SUMMARY
-          jq '.' "${{ inputs.data-file-path }}" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### config.yml" >> $GITHUB_STEP_SUMMARY
-          echo '```yaml' >> $GITHUB_STEP_SUMMARY
-          cat "${{ inputs.config-file-path }}" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-
-  # =====================================================
-  # Stage 3: Security Scan (Parallel)
-  # =====================================================
-  security-scan:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    needs: [prepare]
-    if: ${{ inputs.FLAG_RUN_SECRET_SCAN }}
-    continue-on-error: true
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Run Gitleaks secret scan
+      - name: Validate input files
+        shell: bash
         run: |
           set -euo pipefail
 
-          GITLEAKS_VERSION="8.24.2"
-          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o gitleaks.tar.gz
-          tar -xzf gitleaks.tar.gz gitleaks
-          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          DATA_FILE='${{ inputs.data-file-path }}'
+          CONFIG_FILE='${{ inputs.config-file-path }}'
 
-          gitleaks detect --source . --verbose --redact --exit-code 1
-
-  # =====================================================
-  # Stage 4: Package
-  # =====================================================
-  package:
-    name: Create Package
-    runs-on: ubuntu-latest
-    needs: [prepare, validate]
-    outputs:
-      artifact-zip: ${{ steps.package.outputs.artifact-zip }}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Create artifact package
-        id: package
-        run: |
-          VERSION="${{ needs.prepare.outputs.version }}"
-          ARTIFACT_NAME="${{ needs.prepare.outputs.artifact-name }}"
-          ARTIFACT_ZIP="${ARTIFACT_NAME}.zip"
-          
-          echo "::group::Creating artifact package"
-          
-          # Create staging directory
-          mkdir -p staging
-          
-          # Copy required files
-          cp "${{ inputs.data-file-path }}" staging/data.json
-          cp "${{ inputs.config-file-path }}" staging/config.yml
-          
-          # Add metadata file
-          cat > staging/metadata.json << EOF
-          {
-            "application": "${{ inputs.application }}",
-            "component": "${{ inputs.component-name }}",
-            "version": "${VERSION}",
-            "projectVersion": "${{ needs.prepare.outputs.project-version }}",
-            "runNumber": "${{ github.run_number }}",
-            "sha": "${{ github.sha }}",
-            "ref": "${{ github.ref }}",
-            "repository": "${{ github.repository }}",
-            "buildTimestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "actor": "${{ github.actor }}"
-          }
-          EOF
-          
-          # Create zip artifact
-          cd staging
-          zip -r "../${ARTIFACT_ZIP}" .
-          cd ..
-          
-          # Generate checksum
-          sha256sum "${ARTIFACT_ZIP}" > "${ARTIFACT_ZIP}.sha256"
-          
-          echo "artifact-zip=${ARTIFACT_ZIP}" >> $GITHUB_OUTPUT
-          echo "::notice::Created artifact: ${ARTIFACT_ZIP}"
-          echo "::endgroup::"
-          
-          # Display contents
-          echo "::group::Artifact contents"
-          unzip -l "${ARTIFACT_ZIP}"
-          echo "::endgroup::"
-
-      - name: Upload artifact to workflow
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ needs.prepare.outputs.artifact-name }}
-          path: |
-            ${{ steps.package.outputs.artifact-zip }}
-            ${{ steps.package.outputs.artifact-zip }}.sha256
-          retention-days: ${{ env.ARTIFACT_RETENTION_DAYS }}
-
-  # =====================================================
-  # Stage 5: Publish to Artifactory
-  # =====================================================
-  publish-artifact:
-    name: Publish to Artifactory
-    runs-on: ubuntu-latest
-    needs: [prepare, package]
-    if: ${{ needs.prepare.outputs.publish-artifacts == 'true' && inputs.FLAG_PUBLISH_ARTIFACTS }}
-    outputs:
-      artifact-path: ${{ steps.publish.outputs.artifact-path }}
-
-    env:
-      ARTIFACTORY_URL: ${{ needs.prepare.outputs.artifactory-url }}
-
-    steps:
-      - name: Checkout repository metadata
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ needs.prepare.outputs.artifact-name }}
-
-      - name: Validate Artifactory configuration
-        run: |
-          URL="${{ needs.prepare.outputs.artifactory-url }}"
-          if [ -z "$URL" ] || [ -z "${{ secrets.DSO_ARTIFACTORY_TOKEN }}" ]; then
-            echo "::error::Missing Artifactory configuration. Artifactory URL: empty, Token: ${{ secrets.DSO_ARTIFACTORY_TOKEN != '' && 'present' || 'missing' }}"
+          if [ ! -f "$DATA_FILE" ]; then
+            echo "::error::data.json not found at: $DATA_FILE"
             exit 1
           fi
-          echo "::notice::Artifactory URL resolved: ${URL:0:20}...."
 
-      - name: Setup JFrog CLI
-        uses: jfrog/setup-jfrog-cli@v4
-        env:
-          JF_URL: ${{ needs.prepare.outputs.artifactory-url }}
-          JF_ACCESS_TOKEN: ${{ secrets.DSO_ARTIFACTORY_TOKEN }}
+          if [ ! -f "$CONFIG_FILE" ]; then
+            echo "::error::config.yml not found at: $CONFIG_FILE"
+            exit 1
+          fi
 
-      # - name: Publish to Artifactory
-      #   id: publish
-      #   run: |
-      #     ARTIFACT_NAME="${{ needs.prepare.outputs.artifact-name }}"
-      #     ARTIFACT_ZIP="${ARTIFACT_NAME}.zip"
-      #     VERSION="${{ needs.prepare.outputs.version }}"
-      #     LOWER_APP="${{ needs.prepare.outputs.lower-app-name }}"
-      #     PREFIX=$(echo "${{ inputs.application }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
-          
-      #     # Define Artifactory repository path
-      #     REPO_PATH="${PREFIX}-generic-snapshot/${LOWER_APP}/${{ inputs.component-name }}/${VERSION}"
-      #     FULL_PATH="${REPO_PATH}/${ARTIFACT_ZIP}"
-          
-      #     echo "::group::Publishing to Artifactory"
-      #     echo "Repository path: ${FULL_PATH}"
-          
-      #     # Upload artifact and checksum
-      #     jf rt upload --build-name="${{ inputs.application }}-keyvault" --build-number="${{ github.run_number }}" "${ARTIFACT_ZIP}" "${FULL_PATH}"
+          jq -e 'type == "object"' "$DATA_FILE" > /dev/null
 
-      #     # Attach metadata properties after upload
-      #     jf rt sp "${FULL_PATH}" "version=${VERSION};application=${{ inputs.application }};component=${{ inputs.component-name }};sha=${{ github.sha }}"
+          INVALID_NAMES=$(jq -r 'keys[] | select(test("^[A-Za-z0-9-]+$") | not)' "$DATA_FILE")
+          if [ -n "$INVALID_NAMES" ]; then
+            echo "::error::Invalid Key Vault secret names. Use only letters, numbers and hyphen (-). Invalid names:"
+            echo "$INVALID_NAMES"
+            exit 1
+          fi
 
-      #     jf rt upload --build-name="${{ inputs.application }}-keyvault" --build-number="${{ github.run_number }}" "${ARTIFACT_ZIP}.sha256" "${REPO_PATH}/${ARTIFACT_ZIP}.sha256"
-          
-      #     # Collect and publish build info
-      #     jf rt build-collect-env "${{ inputs.application }}-keyvault" "${{ github.run_number }}"
-      #     jf rt build-add-git "${{ inputs.application }}-keyvault" "${{ github.run_number }}"
-      #     jf rt build-publish "${{ inputs.application }}-keyvault" "${{ github.run_number }}"
-          
-      #     echo "artifact-path=${FULL_PATH}" >> $GITHUB_OUTPUT
-      #     echo "::notice::Artifact published to: ${FULL_PATH}"
-      #     echo "::endgroup::"
+          KEY_COUNT=$(jq 'keys | length' "$DATA_FILE")
+          if [ "$KEY_COUNT" -eq 0 ]; then
+            echo "::error::data.json does not contain secrets"
+            exit 1
+          fi
 
-  # =====================================================
-  # Stage 6: Publish Summary
-  # =====================================================
-  publish-summary:
-    name: Publish Summary
-    runs-on: ubuntu-latest
-    needs: [prepare, package, publish-artifact]
-    if: always() && needs.prepare.result == 'success'
-    outputs:
-      version: ${{ needs.prepare.outputs.version }}
-      artifact-name: ${{ needs.prepare.outputs.artifact-name }}
-      artifact-path: ${{ needs.publish-artifact.outputs.artifact-path }}
+          echo "::notice::Validated $KEY_COUNT secret name(s). Values in data.json will be ignored. New secrets will use '${{ inputs.initial-secret-value }}'."
 
-    steps:
-      - name: Generate CI Summary
+      - name: Load environment configuration
+        id: config
+        shell: bash
         run: |
-          VERSION="${{ needs.prepare.outputs.version }}"
-          ARTIFACT_NAME="${{ needs.prepare.outputs.artifact-name }}"
-          
-          cat >> $GITHUB_STEP_SUMMARY << EOF
-          # CI Build Summary - Azure KeyVault
-          
-          ## Build Information
+          set -euo pipefail
+
+          CONFIG_FILE='${{ inputs.config-file-path }}'
+          ENVIRONMENT='${{ inputs.environment }}'
+
+          KEYVAULT_NAME=$(awk -v env="$ENVIRONMENT" '
+            $0 ~ "^" env ":" { in_env=1; next }
+            in_env && /^[A-Za-z0-9_-]+:/ { exit }
+            in_env && $1 == "keyvault-name:" { print $2; exit }
+            in_env && $1 == "resourceName:" { print $2; exit }
+          ' "$CONFIG_FILE" | tr -d '"'"'"'')
+
+          RESOURCE_GROUP=$(awk -v env="$ENVIRONMENT" '
+            $0 ~ "^" env ":" { in_env=1; next }
+            in_env && /^[A-Za-z0-9_-]+:/ { exit }
+            in_env && $1 == "resource-group:" { print $2; exit }
+          ' "$CONFIG_FILE" | tr -d '"'"'"'')
+
+          if [ -z "$KEYVAULT_NAME" ]; then
+            echo "::error::Missing '${ENVIRONMENT}.keyvault-name' in $CONFIG_FILE"
+            exit 1
+          fi
+
+          echo "keyvault-name=$KEYVAULT_NAME" >> "$GITHUB_OUTPUT"
+          echo "resource-group=$RESOURCE_GROUP" >> "$GITHUB_OUTPUT"
+
+          echo "::notice::Target environment: $ENVIRONMENT"
+          echo "::notice::Target Key Vault: $KEYVAULT_NAME"
+          if [ -n "$RESOURCE_GROUP" ]; then
+            echo "::notice::Resource Group: $RESOURCE_GROUP"
+          fi
+
+      - name: Azure login using OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify Key Vault access
+        shell: bash
+        run: |
+          set -euo pipefail
+          az keyvault show --name '${{ steps.config.outputs.keyvault-name }}' --query name -o tsv
+          echo "::notice::Azure login and Key Vault lookup succeeded."
+
+      - name: Dry run preview
+        uses: Demo-PCB/dso-keyvault-reusable/.github/actions/keyvault-dry-run@main
+        with:
+          keyvault-name: ${{ steps.config.outputs.keyvault-name }}
+          data-file-path: ${{ inputs.data-file-path }}
+          initial-secret-value: ${{ inputs.initial-secret-value }}
+          environment: ${{ inputs.environment }}
+
+      - name: Create missing secrets safely
+        id: import
+        if: ${{ inputs.dry-run == false }}
+        uses: Demo-PCB/dso-keyvault-reusable/.github/actions/keyvault-import@main
+        with:
+          keyvault-name: ${{ steps.config.outputs.keyvault-name }}
+          data-file-path: ${{ inputs.data-file-path }}
+          initial-secret-value: ${{ inputs.initial-secret-value }}
+
+      - name: Dry-run only outputs
+        id: dry_run_outputs
+        if: ${{ inputs.dry-run == true }}
+        shell: bash
+        run: |
+          echo "status=dry-run" >> "$GITHUB_OUTPUT"
+          echo "created-count=0" >> "$GITHUB_OUTPUT"
+          echo "skipped-count=0" >> "$GITHUB_OUTPUT"
+          echo "demo-count=0" >> "$GITHUB_OUTPUT"
+
+      - name: Job summary
+        shell: bash
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF_SUMMARY
+          ## Azure Key Vault update
+
           | Property | Value |
-          |----------|-------|
-          | **Application** | ${{ inputs.application }} |
-          | **Component** | ${{ inputs.component-name }} |
-          | **Version** | \`${VERSION}\` |
-          | **Project Version** | ${{ needs.prepare.outputs.project-version }} |
-          | **Run Number** | ${{ github.run_number }} |
-          | **Commit SHA** | \`${{ github.sha }}\` |
-          | **Branch** | ${{ github.ref_name }} |
-          
-          ## Artifact Information
-          | Property | Value |
-          |----------|-------|
-          | **Artifact Name** | \`${ARTIFACT_NAME}\` |
-          | **Published** | ${{ needs.prepare.outputs.publish-artifacts == 'true' && '✅ Yes' || '❌ No (PR build)' }} |
-          ${{ needs.publish-artifact.outputs.artifact-path && format('| **Artifactory Path** | `{0}` |', needs.publish-artifact.outputs.artifact-path) || '' }}
-          
-          ## Next Steps
-          
-          To deploy this version to an environment, trigger the corresponding CD workflow:
-          
-          \`\`\`
-          Version to deploy: ${VERSION}
-          \`\`\`
-          
-          1. **DEV**: Trigger \`CD - KeyVault DEV\` workflow with version \`${VERSION}\`
-          2. **UAT**: Trigger \`CD - KeyVault UAT\` workflow with version \`${VERSION}\`
-          3. **PRD**: Trigger \`CD - KeyVault PRD\` workflow (requires approval)
-          EOF
+          |---|---|
+          | Environment | ${{ inputs.environment }} |
+          | Key Vault | ${{ steps.config.outputs.keyvault-name }} |
+          | Data file | ${{ inputs.data-file-path }} |
+          | Initial value for new secrets | ${{ inputs.initial-secret-value }} |
+          | Dry run | ${{ inputs.dry-run }} |
+
+          Policy applied:
+          - Missing secret: create with value `${{ inputs.initial-secret-value }}`.
+          - Existing secret with value `${{ inputs.initial-secret-value }}`: keep as-is.
+          - Existing secret with any other value: skip and do not create a new version.
+          EOF_SUMMARY
