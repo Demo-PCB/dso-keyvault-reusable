@@ -450,38 +450,38 @@ jobs:
           JF_URL: ${{ needs.prepare.outputs.artifactory-url }}
           JF_ACCESS_TOKEN: ${{ secrets.DSO_ARTIFACTORY_TOKEN }}
 
-      - name: Publish to Artifactory
-        id: publish
-        run: |
-          ARTIFACT_NAME="${{ needs.prepare.outputs.artifact-name }}"
-          ARTIFACT_ZIP="${ARTIFACT_NAME}.zip"
-          VERSION="${{ needs.prepare.outputs.version }}"
-          LOWER_APP="${{ needs.prepare.outputs.lower-app-name }}"
-          PREFIX=$(echo "${{ inputs.application }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+      # - name: Publish to Artifactory
+      #   id: publish
+      #   run: |
+      #     ARTIFACT_NAME="${{ needs.prepare.outputs.artifact-name }}"
+      #     ARTIFACT_ZIP="${ARTIFACT_NAME}.zip"
+      #     VERSION="${{ needs.prepare.outputs.version }}"
+      #     LOWER_APP="${{ needs.prepare.outputs.lower-app-name }}"
+      #     PREFIX=$(echo "${{ inputs.application }}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
           
-          # Define Artifactory repository path
-          REPO_PATH="${PREFIX}-generic-snapshot/${LOWER_APP}/${{ inputs.component-name }}/${VERSION}"
-          FULL_PATH="${REPO_PATH}/${ARTIFACT_ZIP}"
+      #     # Define Artifactory repository path
+      #     REPO_PATH="${PREFIX}-generic-snapshot/${LOWER_APP}/${{ inputs.component-name }}/${VERSION}"
+      #     FULL_PATH="${REPO_PATH}/${ARTIFACT_ZIP}"
           
-          echo "::group::Publishing to Artifactory"
-          echo "Repository path: ${FULL_PATH}"
+      #     echo "::group::Publishing to Artifactory"
+      #     echo "Repository path: ${FULL_PATH}"
           
-          # Upload artifact and checksum
-          jf rt upload --build-name="${{ inputs.application }}-keyvault" --build-number="${{ github.run_number }}" "${ARTIFACT_ZIP}" "${FULL_PATH}"
+      #     # Upload artifact and checksum
+      #     jf rt upload --build-name="${{ inputs.application }}-keyvault" --build-number="${{ github.run_number }}" "${ARTIFACT_ZIP}" "${FULL_PATH}"
 
-          # Attach metadata properties after upload
-          jf rt sp "${FULL_PATH}" "version=${VERSION};application=${{ inputs.application }};component=${{ inputs.component-name }};sha=${{ github.sha }}"
+      #     # Attach metadata properties after upload
+      #     jf rt sp "${FULL_PATH}" "version=${VERSION};application=${{ inputs.application }};component=${{ inputs.component-name }};sha=${{ github.sha }}"
 
-          jf rt upload --build-name="${{ inputs.application }}-keyvault" --build-number="${{ github.run_number }}" "${ARTIFACT_ZIP}.sha256" "${REPO_PATH}/${ARTIFACT_ZIP}.sha256"
+      #     jf rt upload --build-name="${{ inputs.application }}-keyvault" --build-number="${{ github.run_number }}" "${ARTIFACT_ZIP}.sha256" "${REPO_PATH}/${ARTIFACT_ZIP}.sha256"
           
-          # Collect and publish build info
-          jf rt build-collect-env "${{ inputs.application }}-keyvault" "${{ github.run_number }}"
-          jf rt build-add-git "${{ inputs.application }}-keyvault" "${{ github.run_number }}"
-          jf rt build-publish "${{ inputs.application }}-keyvault" "${{ github.run_number }}"
+      #     # Collect and publish build info
+      #     jf rt build-collect-env "${{ inputs.application }}-keyvault" "${{ github.run_number }}"
+      #     jf rt build-add-git "${{ inputs.application }}-keyvault" "${{ github.run_number }}"
+      #     jf rt build-publish "${{ inputs.application }}-keyvault" "${{ github.run_number }}"
           
-          echo "artifact-path=${FULL_PATH}" >> $GITHUB_OUTPUT
-          echo "::notice::Artifact published to: ${FULL_PATH}"
-          echo "::endgroup::"
+      #     echo "artifact-path=${FULL_PATH}" >> $GITHUB_OUTPUT
+      #     echo "::notice::Artifact published to: ${FULL_PATH}"
+      #     echo "::endgroup::"
 
   # =====================================================
   # Stage 6: Publish Summary
