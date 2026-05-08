@@ -79,15 +79,15 @@ on:
       # =====================================================
       DSO_WORKFLOWS_GHAPP_ID:
         description: 'GitHub App ID used to read centralized workflow configs'
-        required: true
+        required: false
 
       DSO_WORKFLOWS_GHAPP_PK:
         description: 'GitHub App private key used to read centralized workflow configs'
-        required: true
+        required: false
 
       DSO_ARTIFACTORY_TOKEN:
         description: 'Artifactory token for authentication'
-        required: true
+        required: false
 
       # =====================================================
       # Optional Secrets - Fallback for Artifactory URL
@@ -134,15 +134,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Load workflow configs
-        uses: Demo-PCB/dso-commons-reusable/.github/actions/load-workflows-configs@main
-        with:
-          application: ${{ inputs.application }}
-          component-name: ${{ inputs.component-name }}
-          dso-ghe-app-id: ${{ secrets.DSO_WORKFLOWS_GHAPP_ID }}
-          dso-ghe-private-key: ${{ secrets.DSO_WORKFLOWS_GHAPP_PK }}
-          dso-workflows-configs-repo: ${{ vars.DSO_WORKFLOWS_CONFIGS_REPO }}
-          dso-workflows-configs-repo-owner: ${{ vars.DSO_WORKFLOWS_CONFIGS_REPO_OWNER }}
+      # - name: Load workflow configs
+      #   uses: Demo-PCB/dso-commons-reusable/.github/actions/load-workflows-configs@main
+      #   with:
+      #     application: ${{ inputs.application }}
+      #     component-name: ${{ inputs.component-name }}
+      #     dso-ghe-app-id: ${{ secrets.DSO_WORKFLOWS_GHAPP_ID }}
+      #     dso-ghe-private-key: ${{ secrets.DSO_WORKFLOWS_GHAPP_PK }}
+      #     dso-workflows-configs-repo: ${{ vars.DSO_WORKFLOWS_CONFIGS_REPO }}
+      #     dso-workflows-configs-repo-owner: ${{ vars.DSO_WORKFLOWS_CONFIGS_REPO_OWNER }}
 
       - name: Export Artifactory URL from workflow configs
         run: |
